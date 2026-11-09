@@ -6,8 +6,32 @@ import math
 import re
 from typing import Iterable
 
-CJK = re.compile(r"[\u4e00-\u9fff]")
-WORD = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
+CJK = re.compile(r"[一-鿿]")
+# 拉丁字母/数字/希腊字母合并为一个 token（"β1" 保持完整），中文按单字切
+WORD = re.compile(r"[A-Za-z0-9_Ͱ-Ͽ]+|[一-鿿]")
+
+# 希腊字母英文名 → 符号（查询扩展用；epsilon 同时给两种写法 ϵ/ε）
+GREEK_NAMES = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ",
+    "epsilon": "ε ϵ", "zeta": "ζ", "eta": "η", "theta": "θ",
+    "lambda": "λ", "mu": "μ", "nu": "ν", "xi": "ξ", "pi": "π",
+    "rho": "ρ", "sigma": "σ", "tau": "τ", "phi": "φ ϕ",
+    "chi": "χ", "psi": "ψ", "omega": "ω",
+}
+_GREEK_RE = re.compile(
+    r"\b(" + "|".join(GREEK_NAMES) + r")\s*(\d+)?\b", re.I | re.A)
+
+
+def expand_greek(text: str) -> str:
+    """把查询里的 'beta1' 扩展出 'β1'，解决中英文符号不一致导致的检索失效。"""
+    extra: list[str] = []
+    for name, digits in _GREEK_RE.findall(text or ""):
+        symbols = GREEK_NAMES[name.lower()].split()
+        for sym in symbols:
+            extra.append(sym + (digits or ""))
+    return " ".join(extra)
+
+
 SENT_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(\[])|(?<=[。！？；])\s*")
 MATH_HINT = re.compile(r"(\\frac|\\sum|\\int|\$|∑|∫|α|β|γ|δ|θ|λ|μ|σ|ε|∂|∇|=|→|≥|≤)")
 REF_HEADING = re.compile(r"^\s*(references|bibliography|参考文献|参考书目)\s*$", re.I)

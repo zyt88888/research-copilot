@@ -15,13 +15,41 @@ import numpy as np
 
 from ..db import execute, get_conn, loads, query
 from ..settings import EMBEDDING_DIM, RETRIEVE_TOP_K
-from ..utils import tokenize
+from ..utils import CJK, expand_greek, tokenize
+from . import llm
 from .embeddings import embed_query, embed_texts
 
 _index_lock = threading.Lock()
 _cache: dict = {"version": -1, "meta": [], "vectors": None, "bm25": None,
                 "doc_len": [], "avgdl": 0.0}
 _version = 0
+_rewrite_cache: dict[str, str] = {}
+
+
+def _rewrite_query(query: str) -> str:
+    """中文问题改写成英文检索关键词（语料以英文论文为主）。
+
+    无 LLM 或改写失败时返回空串，检索退化为原始查询。结果做进程内缓存。
+    """
+    if not CJK.search(query or ""):
+        return ""
+    if query in _rewrite_cache:
+        return _rewrite_cache[query]
+    rewritten = ""
+    if llm.is_available():
+        try:
+            out = llm.chat(
+                [{"role": "system", "content":
+                  "你是检索助手。把用户问题改写成 5-10 个具体的英文技术检索关键词"
+                  "（空格分隔）。优先选择有区分度的术语（如具体模块名、方法名、"
+                  "符号），避免泛词。只输出关键词，不要解释。"},
+                 {"role": "user", "content": query}],
+                temperature=0, max_tokens=64)
+            rewritten = re.sub(r"\s+", " ", out).strip()[:200]
+        except Exception:
+            rewritten = ""
+    _rewrite_cache[query] = rewritten
+    return rewritten
 
 
 def bump_version() -> None:
@@ -267,17 +295,33 @@ def _cosine(query_vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
 
 def hybrid_search(query: str, paper_ids: list[str] | None = None,
                   top_k: int = RETRIEVE_TOP_K, per_paper: int | None = None) -> list[dict]:
-    """BM25 稀疏 + Dense 稠密，RRF 融合；返回带页码/bbox 的证据块。"""
+    """BM25 稀疏 + Dense 稠密，RRF 融合；返回带页码/bbox 的证据块。
+
+    检索前做两类查询扩展：
+    1. 希腊字母英文名 → 符号（beta1 → β1），匹配论文里的数学写法；
+    2. 中文问题经 LLM 改写为英文关键词，解决中英文语料不匹配。
+    """
     index = _load_index()
     meta = index["meta"]
     if not meta:
         return []
-    bm25 = index["bm25"].score(tokenize(query))
-    dense = _cosine(embed_query(query), index["vectors"])
+    greek = expand_greek(query)
+    rewrite = _rewrite_query(query)
+    base = " ".join(x for x in (query, greek) if x)
+    bm25 = index["bm25"].score(tokenize(base))
+    dense = _cosine(embed_query(" ".join(x for x in (base, rewrite) if x)),
+                    index["vectors"])
     bm25_norm = bm25 / (bm25.max() or 1)
     dense_norm = dense / (dense.max() or 1)
     rrf = 1 / (60 + _rank(bm25)) + 1 / (60 + _rank(dense))
     combined = rrf + 0.15 * bm25_norm + 0.25 * dense_norm
+    if rewrite:
+        # 改写后的英文关键词单独跑一遍 BM25 并参与融合：
+        # 中文原查询的单字 token 在英文语料里无区分度，会稀释聚焦术语
+        bm25_rw = index["bm25"].score(tokenize(
+            " ".join(x for x in (rewrite, greek) if x)))
+        rw_norm = bm25_rw / (bm25_rw.max() or 1)
+        combined = combined + 1 / (60 + _rank(bm25_rw)) + 0.20 * rw_norm
 
     results = []
     for i, score in enumerate(combined):
