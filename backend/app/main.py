@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from .api.chat import router as chat_router
 from .api.code import router as code_router
+from .api.insights import router as insights_router
 from .api.papers import router as papers_router
 from .db import init_db
 from .settings import CORS_ORIGINS
@@ -39,3 +40,4 @@ def health():
 app.include_router(papers_router)
 app.include_router(chat_router)
 app.include_router(code_router)
+app.include_router(insights_router)

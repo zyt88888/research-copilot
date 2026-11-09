@@ -30,6 +30,8 @@ SYSTEM = """你是"科研小助手 Agent"，可以调用工具完成文献分析
 - search_arxiv(query) 在线检索 arXiv 找新论文（不入库）
 - fetch_arxiv(arxiv_id) 按 arXiv id 下载并加入文库
 - run_python(code) 在沙箱执行 Python（可 import pandas/numpy/matplotlib 做数据处理与画图）
+- repro_check(paper_id) 检查论文的 GitHub 仓库与复现性
+- recommend_papers(paper_id) 按兴趣推荐库内相似论文
 可用论文：{papers}
 规则：不要编造工具与论文 id；信息足够时输出 final。
 同一工具最多用一次，需要多步请换不同工具，不要重复相同调用。
@@ -49,6 +51,8 @@ TOOLS = {
     "search_arxiv": "在线检索 arXiv",
     "fetch_arxiv": "下载 arXiv 论文入库",
     "run_python": "沙箱执行 Python",
+    "repro_check": "复现性检查",
+    "recommend_papers": "相关论文推荐",
 }
 
 
@@ -132,6 +136,16 @@ def _run_tool(name: str, args: dict) -> dict:
             return {"tool": name, **ingest.fetch_and_ingest(args.get("arxiv_id", ""))}
         except RuntimeError as exc:
             return {"tool": name, "error": str(exc)}
+    if name == "repro_check":
+        from . import insights
+        pid = args.get("paper_id") or (list_papers()[0]["id"] if list_papers() else "")
+        res = insights.reproducibility(pid)
+        return {"tool": name, **res}
+    if name == "recommend_papers":
+        from . import insights
+        pid = args.get("paper_id") or (list_papers()[0]["id"] if list_papers() else "")
+        res = insights.recommend(pid, int(args.get("top_k", 5)))
+        return {"tool": name, **res}
     if name == "run_python":
         from . import codeexec
         rows = [{"id": p["id"], "title": p["title"], "year": p.get("year"),
@@ -208,6 +222,10 @@ def _offline_plan(task: str) -> list[dict]:
     if re.search(r"arxiv|最新论文|新论文|下载|入库|检索外部", t):
         plan.append({"title": "在线检索 arXiv 候选论文", "tool": "search_arxiv",
                      "args": {"query": task, "limit": 5}})
+    if re.search(r"复现|github|代码仓库|开源", t):
+        plan.append({"title": "检查 GitHub 仓库与复现性", "tool": "repro_check", "args": {}})
+    if re.search(r"推荐|相似|相关论文|接着读", t):
+        plan.append({"title": "按兴趣推荐相关论文", "tool": "recommend_papers", "args": {}})
     if not plan:
         plan.append({"title": "检索相关证据", "tool": "search_library",
                      "args": {"query": task}})
@@ -247,7 +265,8 @@ def run(task: str, paper_ids: list[str] | None = None,
                     "compare_papers(paper_ids,aspect) / citation_graph() / future_work() / "
                     "answer_question(query) / translate_paper(paper_id,lang) / "
                     "draft_outline(idea) / search_arxiv(query) / fetch_arxiv(arxiv_id) / "
-                    "run_python（统计、计算、画图一律用它）。"},
+                    "run_python（统计、计算、画图一律用它）/ repro_check(paper_id) / "
+                    "recommend_papers(paper_id)。"},
             ], max_tokens=500)
             plan = llm.parse_json(planner).get("steps", [])
             steps = plan[:max_steps] if plan else _offline_plan(task)

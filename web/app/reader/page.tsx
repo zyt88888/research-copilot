@@ -35,6 +35,21 @@ function Inner() {
   const [evidence, setEvidence] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [repro, setRepro] = useState<any>(null);
+  const [reco, setReco] = useState<any[] | null>(null);
+
+  // 学术洞察：复现性 + 相关推荐（不阻塞正文渲染，失败静默）
+  useEffect(() => {
+    if (!pid) return;
+    let alive = true;
+    fetch(`/api/backend/api/insights/reproducibility?paper_id=${pid}`)
+      .then(r => (r.ok ? r.json() : null)).then(j => { if (alive) setRepro(j); })
+      .catch(() => {});
+    fetch(`/api/backend/api/insights/recommend?paper_id=${pid}&top_k=5`)
+      .then(r => (r.ok ? r.json() : null)).then(j => { if (alive) setReco(j?.items || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [pid]);
 
   function closePick() {
     setPick(null); setPickResult(null); setPickLoading(false);
@@ -170,6 +185,53 @@ function Inner() {
           }}>查找</button>
         </div>
       </section>
+
+      {(repro || (reco && reco.length > 0)) && (
+        <section className="card">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>🔬 学术洞察</h3>
+            {repro && (
+              <span className="chip" style={{
+                background: repro.score >= 70 ? "#dcfce7" : repro.score >= 40 ? "#fef3c7" : "#fee2e2",
+                borderColor: repro.score >= 70 ? "#22c55e" : repro.score >= 40 ? "#f59e0b" : "#ef4444",
+              }}>复现性 {repro.score}/100</span>
+            )}
+          </div>
+
+          {repro && (
+            <div style={{ marginTop: 10, fontSize: 13 }}>
+              <div style={{ color: "var(--ink-2)" }}>🧪 {repro.verdict}</div>
+              {(repro.repos || []).filter((r: any) => r.found).map((r: any) => (
+                <div key={r.repo} style={{ marginTop: 6, padding: "6px 10px",
+                  border: "1px solid var(--line)", borderRadius: 8, fontSize: 12.5 }}>
+                  <a href={r.url} target="_blank" rel="noreferrer">{r.repo}</a>
+                  <span style={{ color: "var(--ink-3)", marginLeft: 8 }}>
+                    ⭐ {r.stars ?? "-"} · {r.language || "-"} · {r.license || "无 License"} · 更新于 {r.pushed_at || "-"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {reco && reco.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 13, color: "var(--ink-2)" }}>📚 相关推荐（按标题+摘要相似度）</div>
+              <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 5 }}>
+                {reco.slice(0, 5).map((x: any) => (
+                  <div key={x.paper_id} style={{ display: "flex", justifyContent: "space-between",
+                    alignItems: "center", gap: 10, padding: "6px 10px",
+                    border: "1px solid var(--line)", borderRadius: 8 }}>
+                    <span style={{ fontSize: 13 }}>{x.title || x.paper_id}</span>
+                    <button className="btn ghost" style={{ padding: "2px 10px", fontSize: 12,
+                      whiteSpace: "nowrap" }}
+                      onClick={() => router.push(`/reader?id=${x.paper_id}`)}>阅读 →</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
