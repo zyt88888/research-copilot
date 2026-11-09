@@ -1,0 +1,46 @@
+# ============================================================
+# 科研小助手 Agent · 一键部署（Docker Compose）
+# 在有 Docker Desktop 的机器上：docker compose up -d
+# ============================================================
+
+services:
+  # ---- 后端 FastAPI ----
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: research-copilot-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # 数据持久化：把宿主机 data/ 目录挂进容器
+      - ./data:/app/data
+    env_file:
+      - backend/.env
+    environment:
+      - PYTHONUTF8=1
+      - PYTHONUNBUFFERED=1
+      # 容器内路径必须覆盖 .env 里的 Windows 绝对路径
+      - DATA_DIR=/app/data
+      - DB_PATH=/app/data/app.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  # ---- 前端 Next.js ----
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: research-copilot-web
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      - NEXT_PUBLIC_BACKEND=http://backend:8000
+    restart: unless-stopped

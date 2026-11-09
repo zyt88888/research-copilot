@@ -1,0 +1,17 @@
+# -------- 后端 --------
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.12
+pymupdf>=1.25
+networkx>=3.4
+numpy>=1.26
+requests>=2.32
+python-dotenv>=1.0
+pytest>=8.3
+
+# 可选依赖：OCR
+paddleocr>=2.7
+paddlepaddle>=2.6
+
+# 可选依赖：本地 Embedding
+sentence-transformers>=2.2

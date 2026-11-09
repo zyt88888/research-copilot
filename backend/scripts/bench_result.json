@@ -1,0 +1,187 @@
+{
+  "base": "http://localhost:8000",
+  "total": 10,
+  "passed": 10,
+  "success_rate": 1.0,
+  "avg_steps": 1.4,
+  "avg_elapsed_s": 23.7,
+  "with_citations": 8,
+  "results": [
+    {
+      "task": "总结 Transformer 的核心创新点，并给出页码依据。",
+      "paper_ids": null,
+      "ok": true,
+      "error": "",
+      "elapsed": 80.5,
+      "steps": 3,
+      "tools": [
+        "citation_graph",
+        "answer_question",
+        "future_work"
+      ],
+      "tool_errors": 0,
+      "answer_len": 772,
+      "citations": 4,
+      "events": 363,
+      "offline": false,
+      "code": "T1"
+    },
+    {
+      "task": "对比 BERT 与 GPT-2 在预训练目标上的差异。",
+      "paper_ids": null,
+      "ok": true,
+      "error": "",
+      "elapsed": 16.9,
+      "steps": 2,
+      "tools": [
+        "search_library",
+        "compare_papers"
+      ],
+      "tool_errors": 0,
+      "answer_len": 925,
+      "citations": 6,
+      "events": 485,
+      "offline": false,
+      "code": "T2"
+    },
+    {
+      "task": "引用图谱里哪些论文是基石？列出 PageRank 前 3。",
+      "paper_ids": null,
+      "ok": true,
+      "error": "",
+      "elapsed": 12.9,
+      "steps": 1,
+      "tools": [
+        "citation_graph"
+      ],
+      "tool_errors": 0,
+      "answer_len": 622,
+      "citations": 0,
+      "events": 308,
+      "offline": false,
+      "code": "T3"
+    },
+    {
+      "task": "从语料库中抽取 3 条仍未解决的 Future Work。",
+      "paper_ids": null,
+      "ok": true,
+      "error": "",
+      "elapsed": 69.0,
+      "steps": 1,
+      "tools": [
+        "future_work"
+      ],
+      "tool_errors": 0,
+      "answer_len": 715,
+      "citations": 5,
+      "events": 295,
+      "offline": false,
+      "code": "T4"
+    },
+    {
+      "task": "翻译 FlashAttention 论文第 2 页的核心段落。",
+      "paper_ids": null,
+      "ok": true,
+      "error": "",
+      "elapsed": 22.5,
+      "steps": 2,
+      "tools": [
+        "citation_graph",
+        "translate_paper"
+      ],
+      "tool_errors": 0,
+      "answer_len": 1037,
+      "citations": 5,
+      "events": 529,
+      "offline": false,
+      "code": "T5"
+    },
+    {
+      "task": "为「多模态检索增强生成」生成一份论文框架大纲。",
+      "paper_ids": null,
+      "ok": true,
+      "error": "",
+      "elapsed": 17.4,
+      "steps": 1,
+      "tools": [
+        "draft_outline"
+      ],
+      "tool_errors": 0,
+      "answer_len": 1169,
+      "citations": 0,
+      "events": 634,
+      "offline": false,
+      "code": "T6"
+    },
+    {
+      "task": "注意力机制有哪些变体？请基于证据回答。",
+      "paper_ids": null,
+      "ok": true,
+      "error": "",
+      "elapsed": 4.1,
+      "steps": 1,
+      "tools": [
+        "search_library"
+      ],
+      "tool_errors": 0,
+      "answer_len": 768,
+      "citations": 7,
+      "events": 471,
+      "offline": false,
+      "code": "T7"
+    },
+    {
+      "task": "检索关于位置编码的证据片段。",
+      "paper_ids": null,
+      "ok": true,
+      "error": "",
+      "elapsed": 3.5,
+      "steps": 1,
+      "tools": [
+        "search_library"
+      ],
+      "tool_errors": 0,
+      "answer_len": 919,
+      "citations": 8,
+      "events": 426,
+      "offline": false,
+      "code": "T8"
+    },
+    {
+      "task": "总结 LoRA 的动机与效果。",
+      "paper_ids": [
+        "p210609685"
+      ],
+      "ok": true,
+      "error": "",
+      "elapsed": 7.1,
+      "steps": 1,
+      "tools": [
+        "answer_question"
+      ],
+      "tool_errors": 0,
+      "answer_len": 986,
+      "citations": 10,
+      "events": 594,
+      "offline": false,
+      "code": "T9"
+    },
+    {
+      "task": "基于检索结果写 200 字综述段落，必须注明页码。",
+      "paper_ids": null,
+      "ok": true,
+      "error": "",
+      "elapsed": 3.4,
+      "steps": 1,
+      "tools": [
+        "search_library"
+      ],
+      "tool_errors": 0,
+      "answer_len": 612,
+      "citations": 12,
+      "events": 313,
+      "offline": false,
+      "code": "T10"
+    }
+  ]
+}

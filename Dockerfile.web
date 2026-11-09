@@ -1,0 +1,31 @@
+# ============================================================
+# 前端镜像：Node 编译 + next start
+# （Next.js 14 App Router 含动态路由，不适合纯静态 export，用 next start）
+# ============================================================
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY web/package.json web/package-lock.json* ./
+RUN npm install --no-audit --no-fund
+
+COPY web .
+ENV NEXT_PUBLIC_BACKEND=http://backend:8000
+RUN npm run build
+
+# --- Runtime：只装生产依赖 ---
+FROM node:20-alpine
+WORKDIR /app
+
+COPY --from=builder /app/package*.json ./
+RUN npm install --omit=dev --no-audit --no-fund
+
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/next.config.js ./
+
+ENV PORT=3000 \
+    NODE_ENV=production
+
+EXPOSE 3000
+CMD ["npm", "run", "start"]

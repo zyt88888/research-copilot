@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+
+# 运行期数据（演示库 app.db 与 uploads 随仓库提供，仅忽略临时文件）
+data/cache/
+data/app.db-wal
+data/app.db-shm
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# IDE / 系统
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

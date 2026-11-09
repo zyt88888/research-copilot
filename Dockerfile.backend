@@ -1,0 +1,41 @@
+# ============================================================
+# 后端镜像：Python 3.10 + FastAPI + PyMuPDF
+# 构建：docker build -f Dockerfile.backend -t research-backend .
+# ============================================================
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# 系统依赖（PyMuPDF 不需要 gcc；libgl1/libgomp1 是 PaddleOCR/OpenCV 运行库；curl 给 healthcheck）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl libglib2.0-0 libgl1 libgomp1 libsm6 libxext6 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 先装依赖（Docker 缓存层：requirements 不改就不重装）
+# 国内网络默认走清华 PyPI 镜像，可用 --build-arg PIP_INDEX_URL=... 覆盖
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
+
+# 再装可选依赖（按需开）
+# RUN pip install --no-cache-dir paddleocr paddlepaddle sentence-transformers
+
+# 预下载中文 OCR 模型并烘进镜像（约 133 MB），保证断网时也能识别扫描件
+RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(lang='ch', use_doc_orientation_classify=False, use_doc_unwarping=False, use_textline_orientation=False, enable_mkldnn=False)" \
+    && ls /root/.paddlex/official_models | grep -q det \
+    && ls /root/.paddlex/official_models | grep -q rec
+
+# 复制代码
+COPY backend /app
+
+# 默认离线模式（不配 LLM_API_KEY 也能跑）
+ENV PYTHONUTF8=1 \
+    PYTHONUNBUFFERED=1 \
+    DATA_DIR=/app/data \
+    DB_PATH=/app/data/app.db \
+    PYTHONPATH=/app
+
+EXPOSE 8000
+
+# uvicorn 直接跑；--host 0.0.0.0 让容器外能访问
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
