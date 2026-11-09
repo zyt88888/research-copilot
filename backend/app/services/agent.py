@@ -11,7 +11,7 @@ import uuid
 from typing import Any, Generator
 
 from ..db import execute
-from ..utils import snippet
+from ..utils import CJK, snippet
 from . import copilot, graph, llm, rag, translate
 from .store import (chunks_of, hybrid_search, index_stats, list_papers,
                     now, paper_meta, refs_of)
@@ -27,6 +27,8 @@ SYSTEM = """你是"科研小助手 Agent"，可以调用工具完成文献分析
 - future_work(paper_ids?) 前沿 Idea 提取
 - translate_paper(paper_id, lang) 翻译论文要点
 - draft_outline(idea, paper_ids?) 生成论文框架
+- search_arxiv(query) 在线检索 arXiv 找新论文（不入库）
+- fetch_arxiv(arxiv_id) 按 arXiv id 下载并加入文库
 可用论文：{papers}
 规则：不要编造工具与论文 id；信息足够时输出 final。"""
 
@@ -39,6 +41,8 @@ TOOLS = {
     "answer_question": "基于证据回答问题",
     "translate_paper": "论文翻译",
     "draft_outline": "生成论文框架",
+    "search_arxiv": "在线检索 arXiv",
+    "fetch_arxiv": "下载 arXiv 论文入库",
 }
 
 
@@ -104,6 +108,24 @@ def _run_tool(name: str, args: dict) -> dict:
         return {"tool": name, "mode": res["mode"],
                 "markdown": res["markdown"][:2500],
                 "references": res.get("references", [])}
+    if name == "search_arxiv":
+        from . import arxiv as arxiv_service
+        from .store import rewrite_query
+        q = args.get("query", "")
+        # arXiv 只认英文：中文任务先改写为英文关键词，否则 all:<中文> 会返回无关结果
+        if CJK.search(q):
+            q = rewrite_query(q) or q
+        cands = arxiv_service.search(q, limit=min(int(args.get("limit", 5)), 10))
+        return {"tool": name, "query": q, "candidates": [
+            {"arxiv_id": c["arxiv_id"], "title": c["title"][:120],
+             "authors": (c["authors"] or [])[:3], "year": c.get("year"),
+             "summary": snippet(c.get("summary", ""), 220)} for c in cands]}
+    if name == "fetch_arxiv":
+        from . import ingest
+        try:
+            return {"tool": name, **ingest.fetch_and_ingest(args.get("arxiv_id", ""))}
+        except RuntimeError as exc:
+            return {"tool": name, "error": str(exc)}
     return {"tool": name, "error": f"未知工具 {name}"}
 
 
@@ -143,6 +165,9 @@ def _offline_plan(task: str) -> list[dict]:
         plan.append({"title": "翻译核心段落", "tool": "translate_paper", "args": {}})
     if re.search(r"框架|大纲|outline|写作|论文结构", t):
         plan.append({"title": "生成无幻觉论文框架", "tool": "draft_outline", "args": {"idea": task}})
+    if re.search(r"arxiv|最新论文|新论文|下载|入库|检索外部", t):
+        plan.append({"title": "在线检索 arXiv 候选论文", "tool": "search_arxiv",
+                     "args": {"query": task, "limit": 5}})
     if not plan:
         plan.append({"title": "检索相关证据", "tool": "search_library",
                      "args": {"query": task}})

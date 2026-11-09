@@ -26,6 +26,51 @@ export default function LibraryPage() {
   const [drag, setDrag] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // arXiv 自动检索 / 下载
+  const [arxivQ, setArxivQ] = useState("");
+  const [arxivBusy, setArxivBusy] = useState(false);
+  const [arxivMsg, setArxivMsg] = useState<string | null>(null);
+  const [arxivCands, setArxivCands] = useState<any[] | null>(null);
+
+  async function searchArxiv() {
+    const q = arxivQ.trim();
+    if (!q) return;
+    setArxivBusy(true); setArxivMsg(null); setArxivCands(null);
+    try {
+      const r = await fetch(`/api/backend/api/papers/discover?query=${encodeURIComponent(q)}&limit=8`);
+      if (!r.ok) throw new Error(`检索失败（HTTP ${r.status}）`);
+      const j = await r.json();
+      setArxivCands(j.candidates || []);
+      if (!(j.candidates || []).length) setArxivMsg("没有找到匹配的论文，换个关键词试试。");
+    } catch (e) {
+      setArxivMsg(e instanceof Error ? e.message : String(e));
+    } finally { setArxivBusy(false); }
+  }
+
+  async function fetchArxiv(id: string) {
+    setArxivBusy(true); setArxivMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append("arxiv_id", id);
+      const r = await fetch("/api/backend/api/papers/fetch-arxiv", { method: "POST", body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || `下载失败（HTTP ${r.status}）`);
+      if (j.status === "ok") {
+        setArxivMsg(`✅ 已入库：${j.title?.slice(0, 60)}（${j.num_pages} 页，${j.refs_count} 条参考文献）`);
+        setArxivCands(null); setArxivQ("");
+        await refresh(true);
+      } else if (j.status === "exists") {
+        setArxivMsg(`ℹ 库中已有这篇论文：${j.title?.slice(0, 60)}`);
+      } else if (j.status === "duplicate") {
+        setArxivMsg(`⚠ 内容与库内论文重复：${j.suggestion || ""}`);
+      } else {
+        setArxivMsg(JSON.stringify(j).slice(0, 200));
+      }
+    } catch (e) {
+      setArxivMsg(e instanceof Error ? e.message : String(e));
+    } finally { setArxivBusy(false); }
+  }
+
   async function refresh(silent = false) {
     if (!silent) setLoading(true);
     setLoadErr(null);
@@ -116,6 +161,53 @@ export default function LibraryPage() {
           </div>
         )}
         {dup && <DuplicateNotice dup={dup} diff={diff} />}
+
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px dashed var(--line)" }}>
+          <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 8 }}>
+            🔎 或从 arXiv 自动检索并下载
+          </div>
+          <div className="row grow">
+            <input type="text" value={arxivQ} onChange={(e) => setArxivQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") searchArxiv(); }}
+              placeholder="输入关键词检索，或直接填 arXiv id（如 1706.03762 / 2205.14135v2）" />
+            <button className="btn" disabled={arxivBusy || !arxivQ.trim()} onClick={searchArxiv}>
+              {arxivBusy ? "处理中…" : "🔍 检索"}
+            </button>
+            {/\d{4}\.\d{4,5}/.test(arxivQ) && (
+              <button className="btn ghost" disabled={arxivBusy}
+                onClick={() => {
+                  const m = arxivQ.match(/\d{4}\.\d{4,5}(v\d+)?/);
+                  if (m) fetchArxiv(m[0]);
+                }}>↓ 直接入库</button>
+            )}
+          </div>
+          {arxivMsg && (
+            <div style={{ marginTop: 8, fontSize: 12.5,
+              color: arxivMsg.startsWith("✅") ? "var(--ok)" :
+                     arxivMsg.startsWith("⚠") ? "var(--warn)" : "var(--ink-3)" }}>
+              {arxivMsg}
+            </div>
+          )}
+          {arxivCands && arxivCands.length > 0 && (
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+              {arxivCands.map((c) => (
+                <div key={c.arxiv_id} style={{ padding: "8px 10px", border: "1px solid var(--line)",
+                  borderRadius: 8 }}>
+                  <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{c.title}</div>
+                    <button className="btn ghost" style={{ padding: "2px 10px", fontSize: 12,
+                      whiteSpace: "nowrap" }} disabled={arxivBusy}
+                      onClick={() => fetchArxiv(c.arxiv_id)}>↓ 加入文库</button>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 3 }}>
+                    {c.arxiv_id} · {(c.authors || []).slice(0, 3).join(", ")}
+                    {c.authors?.length > 3 ? " 等" : ""} · {c.year || "n.d."}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="card">

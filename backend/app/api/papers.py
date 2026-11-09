@@ -40,6 +40,21 @@ def discover(query: str, limit: int = 10):
     return {"query": query, "candidates": arxiv_service.search(query, limit)}
 
 
+@router.post("/fetch-arxiv")
+def fetch_arxiv(arxiv_id: str = Form(...), force: bool = Form(False)):
+    """按 arXiv id 自动下载 PDF 并入库（赛题「给定论文名称/参考文献自动下钻下载」）。
+
+    arxiv_id 可带版本后缀（如 1706.03762v7）或完整 URL。
+    force=True 时即使库里已有同一论文也作为新版本导入。
+    """
+    from ..services import ingest
+
+    try:
+        return ingest.fetch_and_ingest(arxiv_id, force=force)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.get("/{paper_id}")
 def get_paper(paper_id: str):
     meta = store.paper_meta(paper_id)

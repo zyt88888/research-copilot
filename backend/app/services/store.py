@@ -26,7 +26,7 @@ _version = 0
 _rewrite_cache: dict[str, str] = {}
 
 
-def _rewrite_query(query: str) -> str:
+def rewrite_query(query: str) -> str:
     """中文问题改写成英文检索关键词（语料以英文论文为主）。
 
     无 LLM 或改写失败时返回空串，检索退化为原始查询。结果做进程内缓存。
@@ -306,7 +306,7 @@ def hybrid_search(query: str, paper_ids: list[str] | None = None,
     if not meta:
         return []
     greek = expand_greek(query)
-    rewrite = _rewrite_query(query)
+    rewrite = rewrite_query(query)
     base = " ".join(x for x in (query, greek) if x)
     bm25 = index["bm25"].score(tokenize(base))
     dense = _cosine(embed_query(" ".join(x for x in (base, rewrite) if x)),
