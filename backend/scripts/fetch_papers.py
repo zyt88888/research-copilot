@@ -3,12 +3,18 @@
 用法（在 backend 目录执行）：
     python scripts/fetch_papers.py                 # 抓内置 20 篇经典论文
     python scripts/fetch_papers.py --query "vision transformer" --limit 10
+    python scripts/fetch_papers.py --query "retrieval augmented generation" --days 7
+        # 定期任务：只抓最近 7 天投稿的新论文（按投稿时间倒序）
+
+容器内执行：
+    docker exec research-copilot-backend python scripts/fetch_papers.py --query "..." --days 7
 """
 from __future__ import annotations
 
 import argparse
 import sys
 import time
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -76,11 +82,21 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--query", help="改用关键词检索模式")
     ap.add_argument("--limit", type=int, default=10)
+    ap.add_argument("--days", type=int, default=0,
+                    help="只入库最近 N 天投稿的论文（按投稿时间倒序，适合定期任务）")
     args = ap.parse_args()
 
     init_db()
     if args.query:
-        metas = arxiv.search(args.query, args.limit)
+        if args.days > 0:
+            # 定期抓取：按投稿时间倒序取一批，再按日期过滤
+            metas = arxiv.search(args.query, max(args.limit, 50),
+                                 sort_by="submittedDate")
+            cutoff = (date.today() - timedelta(days=args.days)).isoformat()
+            metas = [m for m in metas if (m.get("published") or "") >= cutoff][:args.limit]
+            print(f"只保留 {cutoff} 之后投稿的论文")
+        else:
+            metas = arxiv.search(args.query, args.limit)
     else:
         metas = list(arxiv.metadata(CURATED).values())
         metas.sort(key=lambda m: CURATED.index(m["base_id"]) if m["base_id"] in CURATED else 99)

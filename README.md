@@ -119,6 +119,7 @@ Docker 运行时，`docker-compose.yml` 会把 `DATA_DIR=/app/data`、`DB_PATH=/
 | GET | `/api/health` | 健康检查，返回 `llm` / `embedding` 状态 |
 | GET/POST | `/api/papers` | 论文列表 / 上传 PDF（自动解析、去重、建索引） |
 | GET | `/api/papers/discover` | arXiv 在线检索 |
+| POST | `/api/papers/fetch-arxiv` | 按 arXiv id 下载 PDF 并入库（`exists` / `duplicate` / `ok` 三种状态） |
 | DELETE | `/api/papers/{id}` | 删除论文及其切片、引用 |
 | GET | `/api/papers/{id}/chunks` | 阅读器分页切片（含 bbox） |
 | POST | `/api/chat` | RAG 问答（返回 sources / 置信度 / mode） |
@@ -154,6 +155,35 @@ python scripts/bench_agent.py
 - 基于该论文提问：`mode=llm`，答案与引用均来自 OCR 文本。
 
 > PaddleOCR 模型已固化在后端镜像中，断网可直接识别；库内无模型且离线时降级为 `needs_ocr`，阅读器给出「扫描页未识别」提示。
+
+---
+
+## 6.1 定期抓取最新论文
+
+赛题要求的「长时间自主科研监控」通过**计划任务 + 已有入库管线**实现，无需常驻进程：
+
+```bash
+# 抓最近 7 天投稿的 RAG 论文（按投稿时间倒序，日期过滤后入库）
+docker exec research-copilot-backend python /app/scripts/fetch_papers.py \
+    --query "retrieval augmented generation" --days 7 --limit 10
+```
+
+Windows 一键注册每日任务（默认每天 09:00）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup_schedule.ps1 `
+    -Query "retrieval augmented generation" -Days 7 -Limit 10 -Time 09:00
+# 立即跑一次：Start-ScheduledTask -TaskName research-copilot-fetch-arxiv
+# 取消：Unregister-ScheduledTask -TaskName research-copilot-fetch-arxiv -Confirm:$false
+```
+
+Linux/macOS 用 cron 等价实现：
+
+```cron
+0 9 * * * docker exec research-copilot-backend python /app/scripts/fetch_papers.py --query "retrieval augmented generation" --days 7 --limit 10
+```
+
+已入库的论文按 arXiv 底号判重，重复抓取不会产生副本；抓取的新论文自动进入检索、图谱与问答范围。
 
 ---
 

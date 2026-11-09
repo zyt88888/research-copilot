@@ -55,11 +55,14 @@ def _entry_to_dict(entry: ET.Element) -> dict:
     }
 
 
-def search(query: str, limit: int = 20) -> list[dict]:
-    """按关键词检索 arXiv，返回候选论文列表（不入库）。"""
+def search(query: str, limit: int = 20, sort_by: str = "relevance") -> list[dict]:
+    """按关键词检索 arXiv，返回候选论文列表（不入库）。
+
+    sort_by="submittedDate" 时按投稿时间倒序，用于「抓取最新论文」。
+    """
     resp = _get(API, {"search_query": f"all:{query}", "start": 0,
                       "max_results": max(1, min(limit, 50)),
-                      "sortBy": "relevance"})
+                      "sortBy": sort_by, "sortOrder": "descending"})
     root = ET.fromstring(resp.text)
     return [_entry_to_dict(e) for e in root.findall("a:entry", NS)]
 
