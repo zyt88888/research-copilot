@@ -128,6 +128,10 @@ Docker 运行时，`docker-compose.yml` 会把 `DATA_DIR=/app/data`、`DB_PATH=/
 | GET | `/api/future` | Future Work 抽取与 open/resolved 判定 |
 | POST | `/api/translate` | 段落 / 整篇翻译 |
 | POST | `/api/copilot/{outline,diagram,csv}` | 大纲 / 图表 / CSV 转图表 |
+| POST | `/api/code/run` | 受限 Python 沙箱执行（返回 stdout / 图片产物） |
+| GET | `/api/code/artifact/{name}` | 读取沙箱产出的图片 |
+| GET | `/api/insights/reproducibility?paper_id=` | GitHub 仓库复现性评分（stars / License / 维护状态） |
+| GET | `/api/insights/recommend?paper_id=&top_k=5` | 按标题+摘要相似度推荐库内相关论文 |
 | POST | `/api/agent/run` | Agent SSE 流：`start → plan → step_start → tool_result → token → final` |
 | GET | `/api/agent/runs?limit=30` | 执行历史列表（状态 / 耗时 / 摘要） |
 | GET/DELETE | `/api/agent/runs/{run_id}` | 回放单次 trace 与最终答案 / 删除记录 |
@@ -158,7 +162,7 @@ python scripts/bench_agent.py
 
 ---
 
-## 6.1 定期抓取最新论文
+## 6.2 定期抓取最新论文
 
 赛题要求的「长时间自主科研监控」通过**计划任务 + 已有入库管线**实现，无需常驻进程：
 
@@ -187,7 +191,7 @@ Linux/macOS 用 cron 等价实现：
 
 ---
 
-## 6.2 代码执行沙箱
+## 6.3 代码执行沙箱
 
 Agent 内置 `run_python` 工具，可在隔离环境中做数据处理与绘图（`pandas` / `numpy` / `scipy` / `matplotlib`）：
 
@@ -204,6 +208,25 @@ curl -X POST http://localhost:8000/api/code/run \
   -d '{"code":"import numpy as np, matplotlib.pyplot as plt\nplt.bar([1,2,3],[3,1,2])\nplt.savefig(\"c.png\")"}'
 # → {"ok":true,"stdout":"","images":[{"name":"c.png","url":"/api/code/artifact/xxxx_c.png"}]}
 ```
+
+---
+
+## 6.4 GitHub 复现性评估与相关推荐
+
+阅读器页面的「🔬 学术洞察」卡片自动给出两项信息，Agent 也可通过工具查询：
+
+- **复现性评分（0–100）**：从摘要与正文中抽取 `github.com/owner/repo`，调用 GitHub API 拉取 stars / forks / License / 最近推送时间，按「存在仓库、社区规模、维护活跃度、License 明确」加权打分并给出结论。
+- **相关论文推荐**：以标题+摘要为查询走 `hybrid_search`（`per_paper=1` 保证跨论文覆盖），聚合去重后返回 Top‑K，点击「阅读 →」直接跳转。
+
+```bash
+curl "http://localhost:8000/api/insights/reproducibility?paper_id=<id>"
+# → {"score":100,"verdict":"找到 2 个可访问仓库；最高 25258 stars；近期仍在维护；含明确 License",...}
+
+curl "http://localhost:8000/api/insights/recommend?paper_id=<id>&top_k=5"
+# → {"items":[{"paper_id":"...","title":"...","score":0.31}, ...]}
+```
+
+GitHub API 结果缓存 600 秒；未配置网络或仓库无法访问时 `found=false`，评分相应下调，不影响页面其余部分渲染。
 
 ---
 
@@ -273,6 +296,7 @@ flowchart TD
 | 项 | 内容 |
 |---|---|
 | repo | `backend/` + `web/` + Dockerfile + docker-compose + 测试与脚本 |
+| 自主探索 | arXiv 检索与一键入库、定期抓取最新投稿、Python 沙箱、GitHub 复现性与相关推荐（README §6.2–6.4） |
 | data | 演示库 `data/app.db`（23 篇：20 篇核心论文 + 2 份扫描件 + 1 组版本对，4920 切片 / 784 参考文献）+ `uploads/` PDF |
 | README | 本文件（功能、启动、API、评测、架构图、局限） |
 | 评测报告 | `AGENT_BENCHMARK.md`（10 任务成功率 10/10） |
