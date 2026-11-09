@@ -153,6 +153,15 @@ export default function AgentPage() {
                     fontSize: 12, maxHeight: 240, overflow: "auto" }}>
 {JSON.stringify(e.result, null, 2).slice(0, 1500)}
                   </pre>
+                  {(e.result?.images || []).map((img: any) => (
+                    <div key={img.url} style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>🖼 {img.name}</div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={`/api/backend${img.url}`} alt={img.name}
+                        style={{ maxWidth: "100%", border: "1px solid var(--line)",
+                          borderRadius: 8, marginTop: 4 }} />
+                    </div>
+                  ))}
                 </details>
               ))}
             </div>

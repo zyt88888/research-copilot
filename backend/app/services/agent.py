@@ -29,8 +29,13 @@ SYSTEM = """你是"科研小助手 Agent"，可以调用工具完成文献分析
 - draft_outline(idea, paper_ids?) 生成论文框架
 - search_arxiv(query) 在线检索 arXiv 找新论文（不入库）
 - fetch_arxiv(arxiv_id) 按 arXiv id 下载并加入文库
+- run_python(code) 在沙箱执行 Python（可 import pandas/numpy/matplotlib 做数据处理与画图）
 可用论文：{papers}
-规则：不要编造工具与论文 id；信息足够时输出 final。"""
+规则：不要编造工具与论文 id；信息足够时输出 final。
+同一工具最多用一次，需要多步请换不同工具，不要重复相同调用。
+统计、数值计算、绘图类任务请用 run_python：可 import pandas/numpy/matplotlib，
+工作目录已提供 papers.json（库内论文题录，字段 id/title/year/num_pages），
+图片用 plt.savefig('名称.png', dpi=130) 保存即可被系统回收展示。"""
 
 TOOLS = {
     "search_library": "检索文献证据",
@@ -43,6 +48,7 @@ TOOLS = {
     "draft_outline": "生成论文框架",
     "search_arxiv": "在线检索 arXiv",
     "fetch_arxiv": "下载 arXiv 论文入库",
+    "run_python": "沙箱执行 Python",
 }
 
 
@@ -126,7 +132,41 @@ def _run_tool(name: str, args: dict) -> dict:
             return {"tool": name, **ingest.fetch_and_ingest(args.get("arxiv_id", ""))}
         except RuntimeError as exc:
             return {"tool": name, "error": str(exc)}
+    if name == "run_python":
+        from . import codeexec
+        rows = [{"id": p["id"], "title": p["title"], "year": p.get("year"),
+                 "num_pages": p.get("num_pages")} for p in list_papers()]
+        res = codeexec.run_code(args.get("code", ""),
+                                datasets={"papers.json": rows})
+        return {"tool": name, **res}
     return {"tool": name, "error": f"未知工具 {name}"}
+
+
+def _gen_python(task: str) -> str:
+    """按任务生成一段可执行的 Python（沙箱内工作目录有 papers.json）。"""
+    if not llm.is_available():
+        return ""
+    try:
+        raw = llm.chat([
+            {"role": "system", "content":
+                "你是 Python 数据分析助手。只输出可执行代码，不要解释、不要 Markdown 代码块标记。"
+                "工作目录有 papers.json（库内论文题录，字段 id/title/year/num_pages）。"
+                "需要出图时用 matplotlib 并 plt.savefig('chart.png', dpi=130)。"
+                "代码不要读取网络、不要访问工作目录以外的路径。"},
+            {"role": "user", "content": task},
+        ], max_tokens=900)
+        code = (raw or "").strip()
+        if code.startswith("```"):
+            code = code.split("```")[1] if len(code.split("```")) > 1 else code
+            code = code.split("\n", 1)[1] if "\n" in code and code.startswith("python") else code
+        return code.strip()
+    except Exception:
+        return ""
+
+
+def _system_prompt() -> str:
+    """SYSTEM 内含字面量 JSON 花括号，不能用 str.format，只做占位替换。"""
+    return SYSTEM.replace("{papers}", json.dumps(_papers_brief(), ensure_ascii=False))
 
 
 def plan_steps(task: str, paper_ids: list[str] | None = None) -> dict:
@@ -136,7 +176,7 @@ def plan_steps(task: str, paper_ids: list[str] | None = None) -> dict:
                   f"默认论文范围：{paper_ids or '全部'}\n先输出计划（步骤数组），"
                   f'再按 {{"thought","tool","args"}} 逐步执行。')
         try:
-            data = llm.json_chat(SYSTEM.format(papers=json.dumps(papers, ensure_ascii=False)),
+            data = llm.json_chat(_system_prompt(),
                                  prompt,
                                  '{"steps":[{"title":"string","tool":"string"}],'
                                  '"next":{"thought":"string","tool":"string","args":{}}}')
@@ -199,11 +239,15 @@ def run(task: str, paper_ids: list[str] | None = None,
     if llm.is_available():
         try:
             planner = llm.chat([
-                {"role": "system", "content": SYSTEM.format(
-                    papers=json.dumps(_papers_brief(), ensure_ascii=False))},
+                {"role": "system", "content": _system_prompt()},
                 {"role": "user", "content":
                     f"任务：{task}\n请先给 2-5 步计划 JSON："
-                    '{"steps":[{"title":"...","tool":"..."}]}'},
+                    '{"steps":[{"title":"...","tool":"..."}]}\n'
+                    "工具与参数：search_library(query) / paper_detail(paper_id) / "
+                    "compare_papers(paper_ids,aspect) / citation_graph() / future_work() / "
+                    "answer_question(query) / translate_paper(paper_id,lang) / "
+                    "draft_outline(idea) / search_arxiv(query) / fetch_arxiv(arxiv_id) / "
+                    "run_python（统计、计算、画图一律用它）。"},
             ], max_tokens=500)
             plan = llm.parse_json(planner).get("steps", [])
             steps = plan[:max_steps] if plan else _offline_plan(task)
@@ -216,10 +260,18 @@ def run(task: str, paper_ids: list[str] | None = None,
     yield {"type": "plan", "steps": steps}
 
     observations: list[dict] = []
+    used: set[str] = set()
     for i, step in enumerate(steps, start=1):
         tool = step.get("tool") or "search_library"
         if tool == "final":
             break
+        # 幂等工具（及同工具同参数）重复执行只会浪费额度
+        key = tool + "|" + json.dumps(step.get("args") or {}, sort_keys=True,
+                                      ensure_ascii=False)
+        if key in used:
+            trace.append({"step": i, "tool": tool, "skipped": "重复调用已跳过"})
+            continue
+        used.add(key)
         args = step.get("args") or {}
         if tool == "compare_papers" and not args.get("paper_ids"):
             args["paper_ids"] = paper_ids or [p["id"] for p in list_papers()[:3]]
@@ -233,6 +285,9 @@ def run(task: str, paper_ids: list[str] | None = None,
         if tool == "translate_paper" and not args.get("paper_id"):
             papers = list_papers()
             args["paper_id"] = (papers[0]["id"] if papers else "")
+        if tool == "run_python" and not args.get("code"):
+            # 规划阶段通常只给工具名，代码在执行阶段由模型按任务生成
+            args["code"] = _gen_python(task)
         yield {"type": "step_start", "index": i, "title": step.get("title", tool),
                "tool": tool, "args": args}
         try:

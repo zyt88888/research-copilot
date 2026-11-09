@@ -20,6 +20,10 @@ RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
 # 再装可选依赖（按需开）
 # RUN pip install --no-cache-dir paddleocr paddlepaddle sentence-transformers
 
+# 代码沙箱依赖（数据/绘图）。独立成层：不触发上面 requirements 层重装
+RUN pip install --no-cache-dir --retries 5 --timeout 120 \
+    pandas scipy matplotlib
+
 # 预下载中文 OCR 模型并烘进镜像（约 133 MB），保证断网时也能识别扫描件
 RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(lang='ch', use_doc_orientation_classify=False, use_doc_unwarping=False, use_textline_orientation=False, enable_mkldnn=False)" \
     && ls /root/.paddlex/official_models | grep -q det \

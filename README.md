@@ -187,6 +187,26 @@ Linux/macOS 用 cron 等价实现：
 
 ---
 
+## 6.2 代码执行沙箱
+
+Agent 内置 `run_python` 工具，可在隔离环境中做数据处理与绘图（`pandas` / `numpy` / `scipy` / `matplotlib`）：
+
+- 独立临时工作目录，工作目录预置 `papers.json`（库内题录：`id/title/year/num_pages`）
+- 20 秒超时、环境变量白名单（不传递任何 API Key）、`-I` 隔离模式
+- 静态黑名单拦截网络与命令执行类调用
+- 生成的图片由系统回收，在 Agent 页面「工具返回」里直接预览
+
+直接调用：
+
+```bash
+curl -X POST http://localhost:8000/api/code/run \
+  -H "content-type: application/json" \
+  -d '{"code":"import numpy as np, matplotlib.pyplot as plt\nplt.bar([1,2,3],[3,1,2])\nplt.savefig(\"c.png\")"}'
+# → {"ok":true,"stdout":"","images":[{"name":"c.png","url":"/api/code/artifact/xxxx_c.png"}]}
+```
+
+---
+
 ## 7. 演示
 
 10 分钟答辩分镜（准备清单、逐分钟脚本、3 个演示问题、评委问答）见 `演示脚本_10分钟分镜.md`，其中第八节是逐段录屏操作清单。
