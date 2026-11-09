@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Empty, ErrorState, SkeletonCard } from "../../components/State";
 
 type Paper = { id: string; title: string; year: number | null };
+type Chunk = { id: string; page: number; kind: string; section: string; text: string };
 
 export default function ChatPage() {
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -15,6 +16,14 @@ export default function ChatPage() {
   const [answer, setAnswer] = useState<any>(null);
   const [answerErr, setAnswerErr] = useState<string | null>(null);
   const [mode, setMode] = useState<"chat" | "compare">("chat");
+
+  // 原文对照面板
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelPaperId, setPanelPaperId] = useState<string | null>(null);
+  const [chunks, setChunks] = useState<Chunk[] | null>(null);
+  const [chunksErr, setChunksErr] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const panelBodyRef = useRef<HTMLDivElement>(null);
 
   async function loadPapers() {
     setPapersLoading(true); setPapersErr(null);
@@ -33,6 +42,41 @@ export default function ChatPage() {
   useEffect(() => { loadPapers(); }, []);
 
   const selPapers = useMemo(() => papers.filter(p => selected.includes(p.id)), [papers, selected]);
+
+  // 选中变化时：默认展示第一篇选中论文的原文
+  useEffect(() => {
+    if (selected.length === 0) { setPanelPaperId(null); return; }
+    if (!panelPaperId || !selected.includes(panelPaperId)) {
+      setPanelPaperId(selected[0]);
+    }
+  }, [selected]);
+
+  // 载入面板论文的分块
+  useEffect(() => {
+    if (!panelPaperId) { setChunks(null); return; }
+    setChunks(null); setChunksErr(null); setPage(1);
+    fetch(`/api/backend/api/papers/${panelPaperId}/chunks`).then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }).then(j => setChunks(j.chunks || []))
+      .catch(e => setChunksErr(e instanceof Error ? e.message : String(e)));
+  }, [panelPaperId]);
+
+  const pages = useMemo(() => {
+    if (!chunks) return [];
+    return Array.from(new Set(chunks.map(c => c.page))).sort((a, b) => a - b);
+  }, [chunks]);
+
+  const pageChunks = useMemo(
+    () => (chunks || []).filter(c => c.page === page && c.kind !== "reference"),
+    [chunks, page]);
+
+  function jumpToPage(p: number) {
+    if (!pages.length) return;
+    const clamped = Math.min(Math.max(p, pages[0]), pages[pages.length - 1]);
+    setPage(clamped);
+    panelBodyRef.current?.scrollTo({ top: 0 });
+  }
 
   async function submit() {
     if (mode === "compare" && selected.length < 2) { alert("至少选 2 篇论文对比"); return; }
@@ -53,13 +97,23 @@ export default function ChatPage() {
     }
   }
 
+  const showPanel = panelOpen && panelPaperId && selected.length > 0;
+  const panelPaper = papers.find(p => p.id === panelPaperId) || null;
+
   return (
-    <div className="grid">
+    <div style={showPanel ? { display: "flex", gap: 16, alignItems: "flex-start" } : {}}>
+      <div className="grid" style={showPanel ? { flex: 1, minWidth: 0 } : {}}>
       <section className="card">
         <div className="row">
           <button className={`btn ${mode === "chat" ? "" : "ghost"}`} onClick={() => setMode("chat")}>💬 单篇问答</button>
           <button className={`btn ${mode === "compare" ? "" : "ghost"}`} onClick={() => setMode("compare")}>⚖ 多论文对比</button>
           <span style={{ flex: 1 }} />
+          {selected.length > 0 && (
+            <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 13 }}
+              onClick={() => setPanelOpen(o => !o)}>
+              {panelOpen ? "收起原文 ▸" : "◂ 原文对照"}
+            </button>
+          )}
           <span style={{ color: "var(--ink-3)", fontSize: 13 }}>已选 {selected.length} 篇</span>
         </div>
         {papersLoading ? (
@@ -125,11 +179,18 @@ export default function ChatPage() {
           <div className="answer" style={{ marginTop: 12 }}>{answer.answer}</div>
           {(answer.sources?.length || 0) > 0 && (
             <div className="sources">
-              <strong>📎 证据溯源（点击跳转原文）</strong>
+              <strong>📎 证据溯源（点击{showPanel ? "右侧对照" : "跳转原文"}）</strong>
               {answer.sources.map((s: any) => (
                 <a key={s.sid} className="source"
                   href={`/reader?id=${s.paper_id}&page=${s.page}${s.bbox?.length ?
-                    `#bbox=${s.bbox.join(",")}` : ""}`}>
+                    `#bbox=${s.bbox.join(",")}` : ""}`}
+                  onClick={(e) => {
+                    // 面板正在展示这篇论文时，点击证据直接跳转面板页码，不打断当前页面
+                    if (showPanel && s.paper_id === panelPaperId) {
+                      e.preventDefault();
+                      jumpToPage(s.page);
+                    }
+                  }}>
                   <span className="sid">[{s.sid}]</span>
                   <strong>{s.paper_title}</strong> · 第 {s.page} 页 · {s.section || "-"}
                   <div style={{ marginTop: 4, fontSize: 12, color: "var(--ink-3)" }}>
@@ -146,6 +207,81 @@ export default function ChatPage() {
             </div>
           )}
         </section>
+      )}
+      </div>
+
+      {showPanel && (
+        <aside className="card" style={{
+          width: 430, flexShrink: 0, position: "sticky", top: 72,
+          display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 96px)",
+        }}>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>📖 原文对照</h3>
+            <a className="chip ghost" style={{ fontSize: 12, padding: "2px 8px" }}
+              href={`/reader?id=${panelPaperId}&page=${page}`} target="_blank">
+              完整阅读 ↗
+            </a>
+          </div>
+
+          {selPapers.length > 1 && (
+            <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {selPapers.map(p => (
+                <button key={p.id} className="chip ghost"
+                  style={{ cursor: "pointer", padding: "3px 8px", fontSize: 12,
+                    border: "1px solid var(--line)",
+                    background: p.id === panelPaperId ? "var(--ink)" : "#fff",
+                    color: p.id === panelPaperId ? "#fff" : "var(--ink-2)" }}
+                  onClick={() => setPanelPaperId(p.id)}>
+                  {p.title?.slice(0, 26)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-3)" }}>
+            {panelPaper?.title}
+          </div>
+
+          <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
+            <button className="btn ghost" style={{ padding: "2px 10px" }}
+              disabled={!pages.length || page <= pages[0]}
+              onClick={() => jumpToPage(pages[pages.indexOf(page) - 1] ?? page)}>‹ 上一页</button>
+            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              第 {page} 页 / 共 {pages.length} 页
+            </span>
+            <button className="btn ghost" style={{ padding: "2px 10px" }}
+              disabled={!pages.length || page >= pages[pages.length - 1]}
+              onClick={() => jumpToPage(pages[pages.indexOf(page) + 1] ?? page)}>下一页 ›</button>
+          </div>
+
+          <div ref={panelBodyRef} style={{
+            marginTop: 10, overflowY: "auto", flex: 1, minHeight: 200,
+            borderTop: "1px solid var(--line)", paddingTop: 10,
+          }}>
+            {chunksErr ? (
+              <ErrorState title="原文载入失败" message={chunksErr} />
+            ) : chunks === null ? (
+              <div className="skeleton">
+                <div className="sk-line" style={{ width: "90%" }} />
+                <div className="sk-line" style={{ width: "75%" }} />
+                <div className="sk-line" style={{ width: "82%" }} />
+              </div>
+            ) : pageChunks.length === 0 ? (
+              <Empty compact icon="📄" title="本页无正文" desc="试试翻页。" />
+            ) : (
+              pageChunks.map(c => (
+                <div key={c.id} style={{ marginBottom: 10 }}>
+                  {c.kind === "heading" ? (
+                    <div style={{ fontWeight: 600, fontSize: 13.5, marginTop: 4 }}>{c.text}</div>
+                  ) : (
+                    <div style={{ fontSize: 12.5, lineHeight: 1.65, color: "var(--ink-2)",
+                      whiteSpace: "pre-wrap" }}>{c.text}</div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
       )}
     </div>
   );
