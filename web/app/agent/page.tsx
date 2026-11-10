@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState } from "react";
 import { Empty, ErrorState, Skeleton } from "../../components/State";
 
@@ -29,7 +29,7 @@ export default function AgentPage() {
   async function run() {
     setRunning(true); setEvents([]); setErr(null);
     try {
-      const resp = await fetch("/api/agent/run", {
+      const resp = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/agent/run`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ task }),
       });
@@ -157,7 +157,7 @@ export default function AgentPage() {
                     <div key={img.url} style={{ marginTop: 8 }}>
                       <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>🖼 {img.name}</div>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={`/api/backend${img.url}`} alt={img.name}
+                      <img src={`${process.env.NEXT_PUBLIC_BACKEND}${img.url}`} alt={img.name}
                         style={{ maxWidth: "100%", border: "1px solid var(--line)",
                           borderRadius: 8, marginTop: 4 }} />
                     </div>
@@ -199,7 +199,7 @@ function HistoryPanel() {
 
   useEffect(() => {
     setRuns(null); setErr(null);
-    fetch("/api/backend/api/agent/runs?limit=30").then(r => {
+    fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/agent/runs?limit=30`).then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     }).then(j => setRuns(j.runs || []))
@@ -209,7 +209,7 @@ function HistoryPanel() {
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
     setLoadingDetail(true); setDetail(null);
-    fetch(`/api/backend/api/agent/runs/${selectedId}`).then(r => {
+    fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/agent/runs/${selectedId}`).then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     }).then(j => setDetail(j))
@@ -219,7 +219,7 @@ function HistoryPanel() {
 
   async function delRun(id: string) {
     if (!confirm("确认删除这条执行记录？")) return;
-    await fetch(`/api/backend/api/agent/runs/${id}`, { method: "DELETE" });
+    await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/agent/runs/${id}`, { method: "DELETE" });
     if (selectedId === id) setSelectedId(null);
     setRefreshKey(k => k + 1);
   }

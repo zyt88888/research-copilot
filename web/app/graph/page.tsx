@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Empty, ErrorState, Skeleton } from "../../components/State";
 
@@ -34,7 +34,7 @@ export default function GraphPage() {
   async function load() {
     setLoading(true); setErr(null);
     try {
-      const g = await fetch("/api/backend/api/graph").then(r => {
+      const g = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/graph`).then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       });
@@ -45,7 +45,7 @@ export default function GraphPage() {
       setLoading(false);
     }
     // 前沿 Idea 计算较慢，独立加载，不阻塞图谱主体
-    fetch("/api/backend/api/future")
+    fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/future`)
       .then(r => r.json()).then(setFuture).catch(() => setFuture(null));
   }
 

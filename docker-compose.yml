@@ -41,6 +41,6 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    environment:
-      - NEXT_PUBLIC_BACKEND=http://backend:8000
+    # NEXT_PUBLIC_BACKEND 在 build 时硬编码进产物，默认 http://localhost:8000
+    # （浏览器可直接访问，避免 Next.js rewrite 30s 超时）
     restart: unless-stopped

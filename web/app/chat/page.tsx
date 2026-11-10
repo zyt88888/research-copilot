@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Empty, ErrorState, SkeletonCard } from "../../components/State";
 
@@ -29,7 +29,7 @@ export default function ChatPage() {
   async function loadPapers() {
     setPapersLoading(true); setPapersErr(null);
     try {
-      const r = await fetch("/api/backend/api/papers");
+      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       setPapers(j.papers || []);
@@ -56,7 +56,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!panelPaperId) { setChunks(null); return; }
     setChunks(null); setChunksErr(null); setPage(1);
-    fetch(`/api/backend/api/papers/${panelPaperId}/chunks`).then(r => {
+    fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/${panelPaperId}/chunks`).then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     }).then(j => setChunks(j.chunks || []))
@@ -83,7 +83,7 @@ export default function ChatPage() {
     if (mode === "compare" && selected.length < 2) { alert("至少选 2 篇论文对比"); return; }
     setLoading(true); setAnswer(null); setAnswerErr(null);
     try {
-      const url = mode === "chat" ? "/api/backend/api/chat" : "/api/backend/api/compare";
+      const url = mode === "chat" ? `${process.env.NEXT_PUBLIC_BACKEND}/api/chat` : `${process.env.NEXT_PUBLIC_BACKEND}/api/compare`;
       const body = mode === "chat"
         ? { query, paper_ids: selected.length ? selected : null, top_k: 8, hierarchical }
         : { paper_ids: selected, aspect };
@@ -193,7 +193,7 @@ export default function ChatPage() {
               <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>
                 🖼 图 {answer.figure.n}（第 {answer.figure.page} 页裁剪原图）
               </div>
-              <img src={`/api/backend${answer.figure.image_url}`} alt={`图 ${answer.figure.n}`}
+              <img src={`${process.env.NEXT_PUBLIC_BACKEND}${answer.figure.image_url}`} alt={`图 ${answer.figure.n}`}
                 style={{ maxWidth: "100%", border: "1px solid var(--line)", borderRadius: 8 }} />
               {answer.figure.ocr_text && (
                 <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)" }}>

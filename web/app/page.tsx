@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState, useRef } from "react";
 import { Empty, ErrorState, Skeleton } from "../components/State";
 
@@ -14,7 +14,7 @@ const coverCache = new Map<string, string>();
 const coverPending = new Map<string, Promise<string | null>>();
 
 async function listPapers(): Promise<Paper[]> {
-  const r = await fetch("/api/backend/api/papers");
+  const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()).papers || [];
 }
@@ -24,10 +24,10 @@ async function loadCover(paperId: string): Promise<string | null> {
   if (coverPending.has(paperId)) return coverPending.get(paperId)!;
   const p = (async () => {
     try {
-      const r = await fetch(`/api/backend/api/thumbnails/${paperId}`, { cache: "force-cache" });
+      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/thumbnails/${paperId}`, { cache: "force-cache" });
       if (!r.ok) return null;
       const j = await r.json();
-      const url = j.image_url ? `/api/backend${j.image_url}` : null;
+      const url = j.image_url ? `${process.env.NEXT_PUBLIC_BACKEND}${j.image_url}` : null;
       if (url) coverCache.set(paperId, url);
       return url;
     } catch { return null; }
@@ -137,7 +137,7 @@ export default function LibraryPage() {
     if (!q) return;
     setArxivBusy(true); setArxivMsg(null); setArxivCands(null);
     try {
-      const r = await fetch(`/api/backend/api/papers/discover?query=${encodeURIComponent(q)}&limit=8&source=${searchSrc}`);
+      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/discover?query=${encodeURIComponent(q)}&limit=8&source=${searchSrc}`);
       if (!r.ok) throw new Error(`检索失败（HTTP ${r.status}）`);
       const j = await r.json();
       setArxivCands(j.candidates || []);
@@ -152,7 +152,7 @@ export default function LibraryPage() {
     try {
       const fd = new FormData();
       fd.append("arxiv_id", id);
-      const r = await fetch("/api/backend/api/papers/fetch-arxiv", { method: "POST", body: fd });
+      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/fetch-arxiv`, { method: "POST", body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j.detail || `下载失败（HTTP ${r.status}）`);
       if (j.status === "ok") {
@@ -191,7 +191,7 @@ export default function LibraryPage() {
     try {
       const fd = new FormData();
       fd.append("file", files[0]);
-      const r = await fetch("/api/backend/api/papers/upload", { method: "POST", body: fd });
+      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/upload`, { method: "POST", body: fd });
       if (!r.ok) throw new Error(`上传失败（HTTP ${r.status}）`);
       const j = await r.json();
       if (j.status === "ok") {
@@ -218,7 +218,7 @@ export default function LibraryPage() {
             if (!keepBoth) { await refresh(true); return; }
             fd2.append("force", "true");
           }
-          const r2 = await fetch("/api/backend/api/papers/upload", { method: "POST", body: fd2 });
+          const r2 = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/upload`, { method: "POST", body: fd2 });
           if (!r2.ok) throw new Error(`入库失败（HTTP ${r2.status}）`);
           await refresh(true);
         }

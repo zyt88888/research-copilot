@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Empty, ErrorState, Skeleton, SkeletonCard } from "../../components/State";
@@ -45,10 +45,10 @@ function Inner() {
     let alive = true;
     setInsightState("loading");
     setRepro(null); setReco(null);
-    const reproP = fetch(`/api/backend/api/insights/reproducibility?paper_id=${pid}`)
+    const reproP = fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/insights/reproducibility?paper_id=${pid}`)
       .then(r => (r.ok ? r.json() : null)).then(j => { if (alive) setRepro(j); return !!j; })
       .catch(() => false);
-    const recoP = fetch(`/api/backend/api/insights/recommend?paper_id=${pid}&top_k=5`)
+    const recoP = fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/insights/recommend?paper_id=${pid}&top_k=5`)
       .then(r => (r.ok ? r.json() : null)).then(j => { if (alive) setReco(j?.items || []); return !!j; })
       .catch(() => false);
     Promise.all([reproP, recoP]).then(([a, b]) => {
@@ -88,7 +88,7 @@ function Inner() {
     if (!pick) return;
     setPickLoading(true);
     try {
-      const r = await fetch(`/api/backend/api/translate`, {
+      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/translate`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ mode: "text", text: pick.text, lang: "zh" }),
       }).then(res => res.json());
@@ -106,11 +106,11 @@ function Inner() {
       || (window.location.hash.startsWith("#bbox=") ? window.location.hash.slice(6) : "");
     const nums = raw ? raw.split(",").map(Number) : [];
     Promise.all([
-      fetch(`/api/backend/api/papers/${pid}`).then(r => {
+      fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/${pid}`).then(r => {
         if (!r.ok) throw new Error(`论文信息载入失败（HTTP ${r.status}）`);
         return r.json();
       }),
-      fetch(`/api/backend/api/papers/${pid}/chunks`).then(r => {
+      fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/${pid}/chunks`).then(r => {
         if (!r.ok) throw new Error(`论文内容载入失败（HTTP ${r.status}）`);
         return r.json();
       }),
@@ -140,7 +140,7 @@ function Inner() {
   useEffect(() => {
     if (!pid || !meta) return;
     if (lang === "zh") {
-      fetch(`/api/backend/api/translate`, {
+      fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/translate`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ mode: "paper", paper_id: pid, lang: "zh", limit: 80 }),
       }).then(r => r.json()).then(j => {
