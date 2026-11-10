@@ -260,8 +260,7 @@ select { width: auto; cursor: pointer; }
   border-radius: 0;
   transition: transform .45s var(--ease), filter .3s var(--ease);
   -webkit-font-smoothing: antialiased;
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
+  image-rendering: auto;
 }
 .paper:hover .cover img {
   transform: scale(1.05);
