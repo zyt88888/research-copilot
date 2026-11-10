@@ -216,16 +216,17 @@ select { width: auto; cursor: pointer; }
 .row { display: flex; gap: 12px; align-items: center; }
 .row.grow > * { flex: 1; }
 
-/* ========== 论文卡片（文库） ========== */
+/* ========== 论文卡片（文库，带封面缩略图） ========== */
 .paper {
   border: 1px solid var(--line-soft);
-  border-radius: var(--r-md);
-  padding: 16px;
+  border-radius: var(--r-lg);
   background: #fff;
   box-shadow: var(--shadow-xs);
-  transition: all .25s var(--ease);
+  transition: all .28s var(--ease);
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 .paper::before {
   content: "";
@@ -233,18 +234,73 @@ select { width: auto; cursor: pointer; }
   width: 3px;
   background: var(--brand-grad);
   opacity: 0;
-  transition: opacity .25s var(--ease);
+  transition: opacity .28s var(--ease);
+  z-index: 2;
 }
 .paper:hover {
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
   border-color: transparent;
-  transform: translateY(-2px);
+  transform: translateY(-3px);
 }
 .paper:hover::before { opacity: 1; }
 
-.paper h3 { margin: 0 0 8px; font-size: 15px; line-height: 1.4; color: var(--ink); }
-.paper .meta { color: var(--ink-3); font-size: 12px; margin-bottom: 10px; }
-.paper .stats { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 封面区域 */
+.paper .cover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: linear-gradient(135deg, #eef2ff 0%, #f0f9ff 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+.paper .cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0;
+  transition: transform .45s var(--ease), filter .3s var(--ease);
+  -webkit-font-smoothing: antialiased;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+.paper:hover .cover img {
+  transform: scale(1.05);
+}
+
+/* 扫描件封面：灰度 + 轻微降低对比度（看起来更像复印件） */
+.paper[data-scanned="true"] .cover img,
+.paper .cover img.scanned {
+  filter: grayscale(0.95) contrast(0.92);
+}
+
+/* 封面 placeholder（没图时显示的首字母/图标） */
+.paper .cover .cover-ph {
+  font-size: 42px; font-weight: 700;
+  color: transparent;
+  background: var(--brand-grad);
+  -webkit-background-clip: text; background-clip: text;
+  letter-spacing: -0.02em;
+}
+
+/* 封面 loading 骨架 */
+.paper .cover .cover-sk {
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%);
+  background-size: 400% 100%;
+  animation: sk 1.4s ease infinite;
+}
+
+/* 卡片内容区 */
+.paper .body {
+  padding: 14px 16px 16px;
+  display: flex; flex-direction: column; flex: 1;
+  min-height: 0;
+}
+.paper h3 { margin: 0 0 6px; font-size: 14px; line-height: 1.4; color: var(--ink);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.paper .meta { color: var(--ink-3); font-size: 12px; margin-bottom: 8px;
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.paper .stats { display: flex; gap: 5px; flex-wrap: wrap; margin-top: auto; }
 
 /* 论文来源区分色（左侧细条） */
 .paper[data-source="arxiv"]::before { background: linear-gradient(180deg, #f59e0b, #f97316); opacity: 1; }

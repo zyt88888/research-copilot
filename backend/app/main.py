@@ -14,6 +14,7 @@ from .api.code import router as code_router
 from .api.figures import router as figures_router
 from .api.insights import router as insights_router
 from .api.papers import router as papers_router
+from .api.thumbnails import router as thumbnails_router
 from .db import init_db
 from .settings import CORS_ORIGINS
 from .services import llm, embeddings
@@ -43,3 +44,4 @@ app.include_router(chat_router)
 app.include_router(code_router)
 app.include_router(figures_router)
 app.include_router(insights_router)
+app.include_router(thumbnails_router)

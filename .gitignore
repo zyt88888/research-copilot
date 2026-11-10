@@ -21,6 +21,7 @@ data/app.db-wal
 data/app.db-shm
 data/code_artifacts/
 data/figures/
+data/thumbnails/
 
 # 环境变量
 .env

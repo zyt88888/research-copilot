@@ -9,10 +9,109 @@ type Paper = {
   status: string; page_flags?: Record<number, string>;
 };
 
+// 全局缩略图 URL 缓存——避免同一 paper_id 重复请求
+const coverCache = new Map<string, string>();
+const coverPending = new Map<string, Promise<string | null>>();
+
 async function listPapers(): Promise<Paper[]> {
   const r = await fetch("/api/backend/api/papers");
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()).papers || [];
+}
+
+async function loadCover(paperId: string): Promise<string | null> {
+  if (coverCache.has(paperId)) return coverCache.get(paperId)!;
+  if (coverPending.has(paperId)) return coverPending.get(paperId)!;
+  const p = (async () => {
+    try {
+      const r = await fetch(`/api/backend/api/thumbnails/${paperId}`, { cache: "force-cache" });
+      if (!r.ok) return null;
+      const j = await r.json();
+      const url = j.image_url ? `/api/backend${j.image_url}` : null;
+      if (url) coverCache.set(paperId, url);
+      return url;
+    } catch { return null; }
+  })();
+  coverPending.set(paperId, p);
+  return p;
+}
+
+/** 单篇论文卡片：独立 Hook 懒加载封面。 */
+function PaperCard({ p }: { p: Paper }) {
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverLoading, setCoverLoading] = useState(true);
+  const [coverFailed, setCoverFailed] = useState(false);
+  const scanned = Object.keys(p.page_flags || {}).length > 0;
+
+  useEffect(() => {
+    let alive = true;
+    const url = coverCache.get(p.id);
+    if (url) { setCoverUrl(url); setCoverLoading(false); return; }
+    // 懒加载：等浏览器空闲再请求（不阻塞首屏渲染）
+    const load = () => loadCover(p.id).then(u => {
+      if (!alive) return;
+      if (u) setCoverUrl(u); else setCoverFailed(true);
+      setCoverLoading(false);
+    });
+    if ("requestIdleCallback" in window) {
+      (window as any).requestIdleCallback(load, { timeout: 3000 });
+    } else {
+      setTimeout(load, 200);
+    }
+    return () => { alive = false; };
+  }, [p.id]);
+
+  // 占位字母：取标题第一个大写字母（跳过 "The"/"A"/"An"/"On"/"Towards"/"A New" 等冠词）
+  const phLetter = (() => {
+    const skip = /^(the|a|an|on|in|towards|toward|a new|a survey of|beyond|exploring|rethinking)/i;
+    const t = (p.title || "").trim().replace(skip, "").trim();
+    const m = t.match(/[A-Za-z]/);
+    return m ? m[0].toUpperCase() : "📄";
+  })();
+
+  return (
+    <article key={p.id} className="paper" data-scanned={scanned}>
+      {/* 封面 */}
+      <div className="cover">
+        {coverLoading && <div className="cover-sk" />}
+        {coverUrl && (
+          <img
+            src={coverUrl}
+            alt={`${p.title} 第一页封面`}
+            className={scanned ? "scanned" : ""}
+            loading="lazy"
+            decoding="async"
+            onError={() => { setCoverUrl(null); setCoverFailed(true); }}
+          />
+        )}
+        {!coverLoading && (coverFailed || !coverUrl) && (
+          <span className="cover-ph">{phLetter}</span>
+        )}
+      </div>
+
+      {/* 内容 */}
+      <div className="body">
+        <h3>{p.title || "(未命名)"}</h3>
+        <div className="meta">
+          {(p.authors || []).slice(0, 3).join(", ")} · {p.year || "n.d."}
+          {p.venue && ` · ${p.venue}`}
+        </div>
+        <div className="stats">
+          {p.arxiv_id && <span className="chip">{p.arxiv_id}</span>}
+          <span className="chip">{p.num_pages} 页</span>
+          {scanned
+            ? <span className="chip warn">含扫描页</span>
+            : <span className="chip ok">原生文本</span>}
+        </div>
+        <div className="row" style={{ marginTop: 10, gap: 6 }}>
+          <a className="btn ghost" style={{ flex: 1, textAlign: "center" }}
+            href={`/chat?id=${p.id}`}>💬 问答</a>
+          <a className="btn ghost" style={{ flex: 1, textAlign: "center" }}
+            href={`/reader?id=${p.id}`}>📖 阅读</a>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 export default function LibraryPage() {
@@ -242,28 +341,7 @@ export default function LibraryPage() {
           </div>
         ) : (
         <div className="grid papers" style={{ marginTop: 12 }}>
-          {papers.map((p) => (
-            <article key={p.id} className="paper">
-              <h3>{p.title || "(未命名)"}</h3>
-              <div className="meta">
-                {(p.authors || []).slice(0, 3).join(", ")} · {p.year || "n.d."}
-                {p.venue && ` · ${p.venue}`}
-              </div>
-              <div className="stats">
-                {p.arxiv_id && <span className="chip">{p.arxiv_id}</span>}
-                <span className="chip">{p.num_pages} 页</span>
-                {Object.keys(p.page_flags || {}).length > 0
-                  ? <span className="chip warn">含扫描页</span>
-                  : <span className="chip ok">原生文本</span>}
-              </div>
-              <div className="row" style={{ marginTop: 10, gap: 6 }}>
-                <a className="btn ghost" style={{ flex: 1, textAlign: "center" }}
-                  href={`/chat?id=${p.id}`}>💬 问答</a>
-                <a className="btn ghost" style={{ flex: 1, textAlign: "center" }}
-                  href={`/reader?id=${p.id}`}>📖 阅读</a>
-              </div>
-            </article>
-          ))}
+          {papers.map((p) => <PaperCard key={p.id} p={p} />)}
           {papers.length === 0 && (
             <div style={{ gridColumn: "1 / -1" }}>
               <Empty icon="📚" title="文库还是空的"
