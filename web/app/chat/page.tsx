@@ -16,6 +16,7 @@ export default function ChatPage() {
   const [answer, setAnswer] = useState<any>(null);
   const [answerErr, setAnswerErr] = useState<string | null>(null);
   const [mode, setMode] = useState<"chat" | "compare">("chat");
+  const [hierarchical, setHierarchical] = useState(false);
 
   // 原文对照面板
   const [panelOpen, setPanelOpen] = useState(true);
@@ -84,7 +85,7 @@ export default function ChatPage() {
     try {
       const url = mode === "chat" ? "/api/backend/api/chat" : "/api/backend/api/compare";
       const body = mode === "chat"
-        ? { query, paper_ids: selected.length ? selected : null, top_k: 8 }
+        ? { query, paper_ids: selected.length ? selected : null, top_k: 8, hierarchical }
         : { paper_ids: selected, aspect };
       const r = await fetch(url, { method: "POST",
         headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -101,8 +102,8 @@ export default function ChatPage() {
   const panelPaper = papers.find(p => p.id === panelPaperId) || null;
 
   return (
-    <div style={showPanel ? { display: "flex", gap: 16, alignItems: "flex-start" } : {}}>
-      <div className="grid" style={showPanel ? { flex: 1, minWidth: 0 } : {}}>
+    <div className={showPanel ? "chat-layout" : ""}>
+      <div className="grid chat-main" style={showPanel ? { flex: 1, minWidth: 0 } : {}}>
       <section className="card">
         <div className="row">
           <button className={`btn ${mode === "chat" ? "" : "ghost"}`} onClick={() => setMode("chat")}>💬 单篇问答</button>
@@ -153,6 +154,16 @@ export default function ChatPage() {
           <button className="btn" disabled={loading} onClick={submit}>
             {loading ? "生成中…" : mode === "chat" ? "检索并回答" : "生成对比表"}
           </button>
+          {mode === "chat" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5,
+              color: hierarchical ? "var(--brand)" : "var(--ink-3)", whiteSpace: "nowrap",
+              cursor: "pointer" }}
+              title="章节级粗索引先定位，再下钻段落级；长文档（百页以上）召回更全">
+              <input type="checkbox" checked={hierarchical}
+                onChange={(e) => setHierarchical(e.target.checked)} />
+              长文档分层检索
+            </label>
+          )}
         </div>
       </section>
 
@@ -177,6 +188,20 @@ export default function ChatPage() {
             </div>
           </div>
           <div className="answer" style={{ marginTop: 12 }}>{answer.answer}</div>
+          {answer.figure?.image_url && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>
+                🖼 图 {answer.figure.n}（第 {answer.figure.page} 页裁剪原图）
+              </div>
+              <img src={`/api/backend${answer.figure.image_url}`} alt={`图 ${answer.figure.n}`}
+                style={{ maxWidth: "100%", border: "1px solid var(--line)", borderRadius: 8 }} />
+              {answer.figure.ocr_text && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)" }}>
+                  图内识别文字：{answer.figure.ocr_text}
+                </div>
+              )}
+            </div>
+          )}
           {(answer.sources?.length || 0) > 0 && (
             <div className="sources">
               <strong>📎 证据溯源（点击{showPanel ? "右侧对照" : "跳转原文"}）</strong>
@@ -211,10 +236,7 @@ export default function ChatPage() {
       </div>
 
       {showPanel && (
-        <aside className="card" style={{
-          width: 430, flexShrink: 0, position: "sticky", top: 72,
-          display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 96px)",
-        }}>
+        <aside className="card chat-aside">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <h3 style={{ margin: 0, fontSize: 15 }}>📖 原文对照</h3>
             <a className="chip ghost" style={{ fontSize: 12, padding: "2px 8px" }}

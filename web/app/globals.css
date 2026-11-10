@@ -20,8 +20,9 @@ main { padding: 24px; max-width: 1400px; margin: 0 auto; }
 .btn { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; }
 .btn.ghost { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-input[type=text], input[type=file], textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line);
-  border-radius: 8px; font: inherit; background: #fff; }
+input[type=text], input[type=file], textarea, select { width: 100%; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff; }
+select { width: auto; }
 textarea { min-height: 100px; resize: vertical; }
 .grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
 .grid.papers { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
@@ -67,6 +68,12 @@ table.compare th { background: #f8fafc; }
 @keyframes sk { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 @media (prefers-reduced-motion: reduce) { .sk-line { animation: none; } }
 
+/* ---- 问答页「回答 + 原文对照」双栏布局 ---- */
+.chat-layout { display: flex; gap: 16px; align-items: flex-start; }
+.chat-layout > .chat-main { flex: 1; min-width: 0; }
+.chat-aside { width: 430px; flex-shrink: 0; position: sticky; top: 72px;
+  display: flex; flex-direction: column; max-height: calc(100vh - 96px); }
+
 /* ---- 移动端适配（≤768px） ---- */
 @media (max-width: 768px) {
   .topbar { padding: 8px 12px; gap: 10px; flex-wrap: wrap; }
@@ -85,5 +92,17 @@ table.compare th { background: #f8fafc; }
   .graph-scroll > svg { min-width: 820px; }
   table.compare { display: block; overflow-x: auto; white-space: nowrap; }
   .state { padding: 20px 10px; }
+  /* 触控目标：按钮/导航/筛选项不小于 40px 高，便于真机点按 */
+  .btn { min-height: 40px; padding: 9px 16px; }
+  .btn.ghost { min-height: 36px; }
+  .chip { font-size: 12px; padding: 3px 10px; }
+  select { min-height: 40px; }
+  /* 问答页双栏退化为上下堆叠，对照面板不再 sticky */
+  .chat-layout { flex-direction: column; }
+  .chat-aside { width: 100%; position: static; max-height: none; }
+  textarea { min-height: 84px; }
+  /* 长表格/代码防溢出 */
+  .answer, .sources, .paper { overflow-wrap: anywhere; }
+  img { max-width: 100%; height: auto; }
 }
 

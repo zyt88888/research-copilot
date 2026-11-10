@@ -117,6 +117,47 @@ def ocr_page(page: "fitz.Page") -> str | None:
         return None
 
 
+def ocr_image(img_path) -> str | None:
+    """对一张图片文件（PNG/JPG）做 OCR，供图内文字识别复用。"""
+    if not OCR_ENABLED:
+        return None
+    engine = _get_ocr()
+    if not engine:
+        return None
+    try:
+        import numpy as np
+        data = np.fromfile(str(img_path), dtype=np.uint8)
+        try:
+            import cv2
+            img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        except ImportError:
+            from PIL import Image
+            img = np.array(Image.open(str(img_path)).convert("RGB"))
+        if img is None:
+            return None
+        if engine[0] == "paddle3":
+            lines = []
+            for res in engine[1].predict(img) or []:
+                texts = res.get("rec_texts") if hasattr(res, "get") else None
+                if texts:
+                    lines.extend(str(t) for t in texts)
+            return "\n".join(x for x in lines if x) or None
+        if engine[0] == "paddle":
+            lines = []
+            for item in engine[1].ocr(img) or []:
+                if item and isinstance(item, list):
+                    for line in item:
+                        if line and len(line) > 1:
+                            lines.append(str(line[1]))
+            return "\n".join(x for x in lines if x) or None
+        import pytesseract
+        tess_lang = {"ch": "chi_sim", "zh": "chi_sim"}.get(OCR_LANG, "eng")
+        return pytesseract.image_to_string(img, lang=tess_lang) or None
+    except Exception as exc:
+        log.warning("图内 OCR 失败 %s: %s", img_path, exc)
+        return None
+
+
 # --------------------------------------------------------------------------
 # 版式工具
 # --------------------------------------------------------------------------

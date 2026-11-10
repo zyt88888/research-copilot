@@ -28,10 +28,12 @@ SYSTEM = """你是"科研小助手 Agent"，可以调用工具完成文献分析
 - translate_paper(paper_id, lang) 翻译论文要点
 - draft_outline(idea, paper_ids?) 生成论文框架
 - search_arxiv(query) 在线检索 arXiv 找新论文（不入库）
+- search_scholar(query) 在线检索 Semantic Scholar 找新论文（不入库，覆盖 arXiv 之外的会议/期刊）
 - fetch_arxiv(arxiv_id) 按 arXiv id 下载并加入文库
 - run_python(code) 在沙箱执行 Python（可 import pandas/numpy/matplotlib 做数据处理与画图）
 - repro_check(paper_id) 检查论文的 GitHub 仓库与复现性
 - recommend_papers(paper_id) 按兴趣推荐库内相似论文
+- figure_lookup(paper_id, figure) 查看论文中第 N 张图：裁剪原图并按图注/正文/OCR 解释图意
 可用论文：{papers}
 规则：不要编造工具与论文 id；信息足够时输出 final。
 同一工具最多用一次，需要多步请换不同工具，不要重复相同调用。
@@ -49,11 +51,50 @@ TOOLS = {
     "translate_paper": "论文翻译",
     "draft_outline": "生成论文框架",
     "search_arxiv": "在线检索 arXiv",
+    "search_scholar": "在线检索 Semantic Scholar",
     "fetch_arxiv": "下载 arXiv 论文入库",
     "run_python": "沙箱执行 Python",
     "repro_check": "复现性检查",
     "recommend_papers": "相关论文推荐",
+    "figure_lookup": "图表定位与解读",
 }
+
+
+# 各工具用于执行级去重的身份参数（其余参数不影响结果语义）
+_DEDUP_KEYS = {
+    "search_library": ("query", "paper_ids"),
+    "paper_detail": ("paper_id",),
+    "compare_papers": ("paper_ids", "aspect"),
+    "citation_graph": ("paper_ids",),
+    "future_work": ("paper_ids",),
+    "answer_question": ("query", "paper_ids"),
+    "translate_paper": ("paper_id", "lang"),
+    "draft_outline": ("idea", "paper_ids"),
+    "search_arxiv": ("query",),
+    "search_scholar": ("query",),
+    "fetch_arxiv": ("arxiv_id",),
+    "run_python": ("code",),
+    "repro_check": ("paper_id",),
+    "recommend_papers": ("paper_id",),
+    "figure_lookup": ("paper_id", "figure"),
+}
+
+
+def _norm(v):
+    if isinstance(v, str):
+        return re.sub(r"\s+", " ", v.strip().lower())
+    if isinstance(v, (list, tuple)):
+        return sorted((_norm(x) for x in v), key=str)
+    return v
+
+
+def _dedup_key(tool: str, args: dict) -> str | None:
+    """按工具身份参数生成去重键；未登记的工具不参与去重。"""
+    keys = _DEDUP_KEYS.get(tool)
+    if not keys:
+        return None
+    ident = {k: _norm(args.get(k)) for k in keys if args.get(k) is not None}
+    return tool + "|" + json.dumps(ident, sort_keys=True, ensure_ascii=False)
 
 
 def _papers_brief() -> list[dict]:
@@ -130,6 +171,19 @@ def _run_tool(name: str, args: dict) -> dict:
             {"arxiv_id": c["arxiv_id"], "title": c["title"][:120],
              "authors": (c["authors"] or [])[:3], "year": c.get("year"),
              "summary": snippet(c.get("summary", ""), 220)} for c in cands]}
+    if name == "search_scholar":
+        from . import scholar as scholar_service
+        from .store import rewrite_query
+        q = args.get("query", "")
+        # S2 以英文语料为主，中文任务同样先改写
+        if CJK.search(q):
+            q = rewrite_query(q) or q
+        cands = scholar_service.search(q, limit=min(int(args.get("limit", 5)), 10))
+        return {"tool": name, "query": q, "candidates": [
+            {"arxiv_id": c.get("arxiv_id"), "title": c["title"][:120],
+             "authors": (c["authors"] or [])[:3], "year": c.get("year"),
+             "venue": c.get("venue"), "citations": c.get("citations"),
+             "summary": snippet(c.get("summary", ""), 220)} for c in cands]}
     if name == "fetch_arxiv":
         from . import ingest
         try:
@@ -145,6 +199,25 @@ def _run_tool(name: str, args: dict) -> dict:
         from . import insights
         pid = args.get("paper_id") or (list_papers()[0]["id"] if list_papers() else "")
         res = insights.recommend(pid, int(args.get("top_k", 5)))
+        return {"tool": name, **res}
+    if name == "figure_lookup":
+        from . import figures
+        n = int(args.get("figure") or args.get("n") or 1)
+        # 未指定论文时按文库顺序找第一篇能定位到该图的（避免撞上无图的扫描件）
+        cands = [args["paper_id"]] if args.get("paper_id") else []
+        cands += [p["id"] for p in list_papers() if p["id"] not in cands]
+        res = None
+        for pid in cands:
+            r = figures.answer_figure(f"图 {n} 展示了什么", pid, n)
+            if r and not r.get("error") and (r.get("caption") or r.get("image_url")):
+                res = r
+                res["paper_id"] = pid
+                break
+        if not res:
+            return {"tool": name, "error": f"库中未定位到图 {n}"}
+        # 对齐 run_python 的图片返回结构，Agent 页可直接渲染
+        res["images"] = ([{"name": f"figure_{n}.png", "url": res["image_url"]}]
+                         if res.get("image_url") else [])
         return {"tool": name, **res}
     if name == "run_python":
         from . import codeexec
@@ -226,6 +299,10 @@ def _offline_plan(task: str) -> list[dict]:
         plan.append({"title": "检查 GitHub 仓库与复现性", "tool": "repro_check", "args": {}})
     if re.search(r"推荐|相似|相关论文|接着读", t):
         plan.append({"title": "按兴趣推荐相关论文", "tool": "recommend_papers", "args": {}})
+    m_fig = re.search(r"(?:图\s*|figure\s*)(\d+)", t)
+    if m_fig:
+        plan.append({"title": f"定位并解读图 {m_fig.group(1)}", "tool": "figure_lookup",
+                     "args": {"figure": int(m_fig.group(1))}})
     if not plan:
         plan.append({"title": "检索相关证据", "tool": "search_library",
                      "args": {"query": task}})
@@ -284,13 +361,6 @@ def run(task: str, paper_ids: list[str] | None = None,
         tool = step.get("tool") or "search_library"
         if tool == "final":
             break
-        # 幂等工具（及同工具同参数）重复执行只会浪费额度
-        key = tool + "|" + json.dumps(step.get("args") or {}, sort_keys=True,
-                                      ensure_ascii=False)
-        if key in used:
-            trace.append({"step": i, "tool": tool, "skipped": "重复调用已跳过"})
-            continue
-        used.add(key)
         args = step.get("args") or {}
         if tool == "compare_papers" and not args.get("paper_ids"):
             args["paper_ids"] = paper_ids or [p["id"] for p in list_papers()[:3]]
@@ -307,6 +377,17 @@ def run(task: str, paper_ids: list[str] | None = None,
         if tool == "run_python" and not args.get("code"):
             # 规划阶段通常只给工具名，代码在执行阶段由模型按任务生成
             args["code"] = _gen_python(task)
+        # 幂等工具（及同工具同参数）重复执行只会浪费额度。
+        # 注意：必须在默认参数填充之后计算键，否则多个待生成代码的 run_python
+        # 规划步骤键相同会被误杀；键按工具语义归一化（大小写/空白/列表顺序不敏感）
+        key = _dedup_key(tool, args)
+        if key and key in used:
+            trace.append({"step": i, "tool": tool, "skipped": "重复调用已跳过"})
+            observations.append({"tool": tool, "note":
+                                 "相同调用已执行过，结果见上文；如需深入请换用其他工具或调整参数"})
+            continue
+        if key:
+            used.add(key)
         yield {"type": "step_start", "index": i, "title": step.get("title", tool),
                "tool": tool, "args": args}
         try:

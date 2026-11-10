@@ -14,7 +14,7 @@ from typing import Iterable
 from ..settings import DUP_THRESHOLD
 from ..utils import norm_ws, normalize_text, snippet, split_sentences
 from . import llm
-from .store import chunks_of, hybrid_search, paper_meta
+from .store import chunks_of, hierarchical_search, hybrid_search, paper_meta
 
 CITE_RE = re.compile(r"\[(S\d{1,2})\]")
 
@@ -26,8 +26,12 @@ SYSTEM = """你是一名严谨的学术阅读助手。必须遵守：
 5. 用中文回答，术语保留英文原词（如 self-attention、BLEU）。"""
 
 
-def _evidence(query: str, paper_ids: list[str] | None, top_k: int) -> list[dict]:
-    hits = hybrid_search(query, paper_ids, top_k=top_k)
+def _evidence(query: str, paper_ids: list[str] | None, top_k: int,
+              hierarchical: bool = False) -> list[dict]:
+    if hierarchical:
+        hits = hierarchical_search(query, paper_ids, top_k=top_k)
+    else:
+        hits = hybrid_search(query, paper_ids, top_k=top_k)
     # 表格与其图注常被重复召回，正文里就会出现 S1/S2 完全相同；按文本去重
     kept: list[dict] = []
     seen: list[str] = []
@@ -135,8 +139,9 @@ def _offline_answer(query: str, evidence: list[dict]) -> str:
 
 
 def answer(query: str, paper_ids: list[str] | None = None,
-           top_k: int = 8, history: list[dict] | None = None) -> dict:
-    evidence = _evidence(query, paper_ids, top_k)
+           top_k: int = 8, history: list[dict] | None = None,
+           hierarchical: bool = False) -> dict:
+    evidence = _evidence(query, paper_ids, top_k, hierarchical=hierarchical)
     if _low_confidence(evidence):
         return {
             "answer": "现有文献库中没有找到与该问题足够相关的原文依据，暂不能给出可靠回答。"

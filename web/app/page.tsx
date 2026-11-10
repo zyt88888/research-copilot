@@ -26,18 +26,19 @@ export default function LibraryPage() {
   const [drag, setDrag] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // arXiv 自动检索 / 下载
+  // 在线学术检索 / 下载（arXiv + Semantic Scholar 双源）
   const [arxivQ, setArxivQ] = useState("");
   const [arxivBusy, setArxivBusy] = useState(false);
   const [arxivMsg, setArxivMsg] = useState<string | null>(null);
   const [arxivCands, setArxivCands] = useState<any[] | null>(null);
+  const [searchSrc, setSearchSrc] = useState<"arxiv" | "s2" | "both">("arxiv");
 
   async function searchArxiv() {
     const q = arxivQ.trim();
     if (!q) return;
     setArxivBusy(true); setArxivMsg(null); setArxivCands(null);
     try {
-      const r = await fetch(`/api/backend/api/papers/discover?query=${encodeURIComponent(q)}&limit=8`);
+      const r = await fetch(`/api/backend/api/papers/discover?query=${encodeURIComponent(q)}&limit=8&source=${searchSrc}`);
       if (!r.ok) throw new Error(`检索失败（HTTP ${r.status}）`);
       const j = await r.json();
       setArxivCands(j.candidates || []);
@@ -164,12 +165,18 @@ export default function LibraryPage() {
 
         <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px dashed var(--line)" }}>
           <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 8 }}>
-            🔎 或从 arXiv 自动检索并下载
+            🔎 或在线检索并下载（支持 arXiv / Semantic Scholar 双源）
           </div>
           <div className="row grow">
             <input type="text" value={arxivQ} onChange={(e) => setArxivQ(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") searchArxiv(); }}
               placeholder="输入关键词检索，或直接填 arXiv id（如 1706.03762 / 2205.14135v2）" />
+            <select value={searchSrc} onChange={(e) => setSearchSrc(e.target.value as any)}
+              style={{ width: 150, flexShrink: 0 }} title="选择检索源">
+              <option value="arxiv">arXiv</option>
+              <option value="s2">Semantic Scholar</option>
+              <option value="both">双源合并</option>
+            </select>
             <button className="btn" disabled={arxivBusy || !arxivQ.trim()} onClick={searchArxiv}>
               {arxivBusy ? "处理中…" : "🔍 检索"}
             </button>
@@ -190,18 +197,27 @@ export default function LibraryPage() {
           )}
           {arxivCands && arxivCands.length > 0 && (
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-              {arxivCands.map((c) => (
-                <div key={c.arxiv_id} style={{ padding: "8px 10px", border: "1px solid var(--line)",
-                  borderRadius: 8 }}>
+              {arxivCands.map((c, i) => (
+                <div key={c.arxiv_id || `s2-${i}`} style={{ padding: "8px 10px",
+                  border: "1px solid var(--line)", borderRadius: 8 }}>
                   <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
                     <div style={{ fontSize: 13, fontWeight: 500 }}>{c.title}</div>
-                    <button className="btn ghost" style={{ padding: "2px 10px", fontSize: 12,
-                      whiteSpace: "nowrap" }} disabled={arxivBusy}
-                      onClick={() => fetchArxiv(c.arxiv_id)}>↓ 加入文库</button>
+                    {c.arxiv_id ? (
+                      <button className="btn ghost" style={{ padding: "2px 10px", fontSize: 12,
+                        whiteSpace: "nowrap" }} disabled={arxivBusy}
+                        onClick={() => fetchArxiv(c.arxiv_id)}>↓ 加入文库</button>
+                    ) : (
+                      <span style={{ fontSize: 11.5, color: "var(--ink-3)",
+                        whiteSpace: "nowrap" }}>无 arXiv 源，暂不可一键入库</span>
+                    )}
                   </div>
                   <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 3 }}>
-                    {c.arxiv_id} · {(c.authors || []).slice(0, 3).join(", ")}
+                    {c.arxiv_id || (c.source === "semanticscholar" ? "Semantic Scholar" : "")}
+                    {c.source === "semanticscholar" && c.arxiv_id ? " · S2" : ""}
+                    {" · "}{(c.authors || []).slice(0, 3).join(", ")}
                     {c.authors?.length > 3 ? " 等" : ""} · {c.year || "n.d."}
+                    {c.citations != null ? ` · 被引 ${c.citations}` : ""}
+                    {c.venue ? ` · ${String(c.venue).slice(0, 30)}` : ""}
                   </div>
                 </div>
               ))}

@@ -19,6 +19,8 @@ out/
 data/cache/
 data/app.db-wal
 data/app.db-shm
+data/code_artifacts/
+data/figures/
 
 # 环境变量
 .env

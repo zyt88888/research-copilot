@@ -33,11 +33,32 @@ def stats():
 
 
 @router.get("/discover")
-def discover(query: str, limit: int = 10):
-    """arXiv 关键词检索：返回候选论文元数据，可传给 scripts/fetch_papers.py 批量入库。"""
-    from ..services import arxiv as arxiv_service
+def discover(query: str, limit: int = 10, source: str = "arxiv"):
+    """在线学术检索：source=arxiv（默认）| s2（Semantic Scholar）| both。
 
-    return {"query": query, "candidates": arxiv_service.search(query, limit)}
+    返回候选论文元数据（不入库），可传给 fetch-arxiv 或 scripts/fetch_papers.py 入库。
+    """
+    from ..services import arxiv as arxiv_service
+    from ..services import scholar as scholar_service
+
+    candidates: list[dict] = []
+    errors: dict[str, str] = {}
+    if source in ("arxiv", "both"):
+        try:
+            candidates += arxiv_service.search(query, limit)
+        except RuntimeError as exc:
+            errors["arxiv"] = str(exc)
+    if source in ("s2", "both"):
+        try:
+            candidates += scholar_service.search(query, limit)
+        except RuntimeError as exc:
+            errors["semanticscholar"] = str(exc)
+    if not candidates and errors:
+        raise HTTPException(status_code=502, detail="；".join(errors.values()))
+    out = {"query": query, "source": source, "candidates": candidates}
+    if errors:
+        out["partial_errors"] = errors  # 单源失败不拖垮另一源
+    return out
 
 
 @router.post("/fetch-arxiv")

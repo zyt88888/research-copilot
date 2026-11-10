@@ -37,17 +37,23 @@ function Inner() {
   const [reloadKey, setReloadKey] = useState(0);
   const [repro, setRepro] = useState<any>(null);
   const [reco, setReco] = useState<any[] | null>(null);
+  const [insightState, setInsightState] = useState<"loading" | "ok" | "fail">("loading");
 
-  // 学术洞察：复现性 + 相关推荐（不阻塞正文渲染，失败静默）
+  // 学术洞察：复现性 + 相关推荐（不阻塞正文渲染；两个接口都失败时给出提示）
   useEffect(() => {
     if (!pid) return;
     let alive = true;
-    fetch(`/api/backend/api/insights/reproducibility?paper_id=${pid}`)
-      .then(r => (r.ok ? r.json() : null)).then(j => { if (alive) setRepro(j); })
-      .catch(() => {});
-    fetch(`/api/backend/api/insights/recommend?paper_id=${pid}&top_k=5`)
-      .then(r => (r.ok ? r.json() : null)).then(j => { if (alive) setReco(j?.items || []); })
-      .catch(() => {});
+    setInsightState("loading");
+    setRepro(null); setReco(null);
+    const reproP = fetch(`/api/backend/api/insights/reproducibility?paper_id=${pid}`)
+      .then(r => (r.ok ? r.json() : null)).then(j => { if (alive) setRepro(j); return !!j; })
+      .catch(() => false);
+    const recoP = fetch(`/api/backend/api/insights/recommend?paper_id=${pid}&top_k=5`)
+      .then(r => (r.ok ? r.json() : null)).then(j => { if (alive) setReco(j?.items || []); return !!j; })
+      .catch(() => false);
+    Promise.all([reproP, recoP]).then(([a, b]) => {
+      if (alive) setInsightState(a || b ? "ok" : "fail");
+    });
     return () => { alive = false; };
   }, [pid]);
 
@@ -186,7 +192,25 @@ function Inner() {
         </div>
       </section>
 
-      {(repro || (reco && reco.length > 0)) && (
+      {insightState === "loading" && (
+        <section className="card" aria-busy="true">
+          <h3 style={{ margin: 0 }}>🔬 学术洞察</h3>
+          <div style={{ marginTop: 10, color: "var(--ink-3)", fontSize: 13 }}>
+            正在评估复现性与相关推荐…
+          </div>
+        </section>
+      )}
+
+      {insightState === "fail" && (
+        <section className="card">
+          <h3 style={{ margin: 0 }}>🔬 学术洞察</h3>
+          <div style={{ marginTop: 10, color: "var(--ink-3)", fontSize: 13 }}>
+            洞察服务暂不可用（不影响正文阅读），可稍后刷新重试。
+          </div>
+        </section>
+      )}
+
+      {insightState === "ok" && (repro || (reco && reco.length > 0)) && (
         <section className="card">
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0 }}>🔬 学术洞察</h3>

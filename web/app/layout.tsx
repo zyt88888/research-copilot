@@ -1,9 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Link from "next/link";
 
 export const metadata: Metadata = {
   description: "PDF 细粒度解析、抗幻觉 RAG、引用图谱、翻译、Copilot、Agent 闭环",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // 阅读场景允许用户放大（可访问性），不做 maximumScale 限制
 };
 
 const nav = [

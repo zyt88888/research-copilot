@@ -110,17 +110,24 @@ def recommend(paper_id: str, top_k: int = 5) -> dict:
     # per_paper=1：每篇只取最相关的一段，保证候选覆盖多篇论文而不是被单篇长文淹没
     hits = hybrid_search(query, None, top_k=40, per_paper=1)
     agg: dict[str, dict] = {}
-    titles = {p["id"]: p.get("title", "") for p in list_papers()}
+    papers = {p["id"]: p for p in list_papers()}
     for h in hits:
         pid = h.get("paper_id")
         if not pid or pid == paper_id:
             continue
         item = agg.get(pid)
         if not item:
-            agg[pid] = {"paper_id": pid, "title": titles.get(pid, h.get("title", "")),
+            agg[pid] = {"paper_id": pid, "title": papers.get(pid, {}).get("title", h.get("title", "")),
                         "score": float(h.get("score") or 0), "pages": [h.get("page")]}
         elif len(item["pages"]) < 3 and h.get("page") not in item["pages"]:
             item["pages"].append(h.get("page"))
-    ranked = sorted(agg.values(), key=lambda x: x["score"], reverse=True)[:top_k]
+    # 同 arXiv 家族（v1/v2/...）只保留得分最高的一个版本，避免推荐位被同一论文占满
+    family: dict[str, dict] = {}
+    for item in sorted(agg.values(), key=lambda x: x["score"], reverse=True):
+        arxiv = (papers.get(item["paper_id"], {}).get("arxiv_id") or "")
+        base = re.sub(r"v\d+$", "", arxiv) or item["paper_id"]
+        if base not in family:
+            family[base] = item
+    ranked = list(family.values())[:top_k]
     return {"paper_id": paper_id, "title": meta.get("title"),
-            "basis": "标题+摘要的混合检索（BM25 + 向量）", "items": ranked}
+            "basis": "标题+摘要的混合检索（BM25 + 向量，同系列版本去重）", "items": ranked}

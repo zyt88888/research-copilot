@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -89,12 +89,16 @@ def main() -> None:
     init_db()
     if args.query:
         if args.days > 0:
-            # 定期抓取：按投稿时间倒序取一批，再按日期过滤
+            # 定期抓取：按投稿时间倒序取一批，再按日期过滤。
+            # arXiv published 是 UTC 时间戳，cutoff 也必须用 UTC 日期，
+            # 否则本地时区（如 UTC+8）会让边界偏移最多一天
             metas = arxiv.search(args.query, max(args.limit, 50),
                                  sort_by="submittedDate")
-            cutoff = (date.today() - timedelta(days=args.days)).isoformat()
-            metas = [m for m in metas if (m.get("published") or "") >= cutoff][:args.limit]
-            print(f"只保留 {cutoff} 之后投稿的论文")
+            cutoff = (datetime.now(timezone.utc).date()
+                      - timedelta(days=args.days)).isoformat()
+            metas = [m for m in metas
+                     if (m.get("published") or "")[:10] >= cutoff][:args.limit]
+            print(f"只保留 {cutoff}（UTC）之后投稿的论文")
         else:
             metas = arxiv.search(args.query, args.limit)
     else:

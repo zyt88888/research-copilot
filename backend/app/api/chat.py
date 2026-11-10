@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from ..db import execute, loads, query
-from ..services import agent, copilot, graph, rag, translate
+from ..services import agent, copilot, figures, graph, rag, translate
 from ..services.rag import answer as rag_answer
 
 router = APIRouter(tags=["chat"])
@@ -22,9 +22,31 @@ def chat(payload: dict):
     if not query:
         raise HTTPException(status_code=400, detail="query required")
     t0 = time.time()
+    # 图表理解快捷通道：「图 N / Figure N 展示了什么」→ 定位原图 + 图注/正文/OCR 依据
+    figs = figures.figure_numbers(query)
+    if figs:
+        from ..services.store import list_papers
+        scope = paper_ids or [p["id"] for p in list_papers()]
+        for pid in scope:
+            fig = figures.answer_figure(query, pid, figs[0])
+            if fig and not fig.get("error") and (fig.get("caption") or fig.get("image_url")):
+                fig["elapsed"] = round(time.time() - t0, 2)
+                fig["mode"] = "figure"
+                fig["answer"] = fig.get("explanation", "")
+                fig["figure"] = {"n": fig["n"], "page": fig["page"],
+                                 "image_url": fig.get("image_url"),
+                                 "ocr_text": fig.get("ocr_text") or ""}
+                fig["sources"] = [{"sid": "S1", "paper_id": pid, "page": fig["page"],
+                                   "section": f"图 {figs[0]}",
+                                   "text": fig.get("caption") or "（图块无文字图注）",
+                                   "bbox": []}]
+                return fig
+    hierarchical = bool(payload.get("hierarchical"))
     result = rag_answer(query, paper_ids=paper_ids, top_k=payload.get("top_k", 8),
-                       history=payload.get("history"))
+                       history=payload.get("history"), hierarchical=hierarchical)
     result["elapsed"] = round(time.time() - t0, 2)
+    if hierarchical:
+        result["mode"] = f'{result.get("mode", "rag")}+hierarchical'
     return result
 
 

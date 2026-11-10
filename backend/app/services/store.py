@@ -169,6 +169,33 @@ def paper_meta(paper_id: str) -> dict | None:
     return data
 
 
+def resolve_pdf_path(meta: dict) -> str | None:
+    """把论文的 PDF 路径解析到当前环境。
+
+    DB 里可能存着入库时的绝对路径（如 Windows D:\\...），容器/评审机上不存在；
+    按「原路径 → DATA_DIR 相对 → uploads/filename → uploads/{paper_id}_filename」逐个探测。
+    """
+    from ..settings import DATA_DIR as _DD  # 延迟导入防循环
+    from pathlib import Path as _P
+    raw = meta.get("path") or ""
+    fname = meta.get("filename") or ""
+    pid = meta.get("id") or ""
+    cands = [raw,
+             str(_P(_DD) / raw) if raw and not _P(raw).is_absolute() else "",
+             str(_P(_DD) / "uploads" / fname) if fname else "",
+             str(_P(_DD) / "uploads" / f"{pid}_{fname}") if fname and pid else ""]
+    for c in cands:
+        if c and _P(c).is_file():
+            return c
+    # 最后兜底：uploads 下按文件名后缀匹配
+    up = _P(_DD) / "uploads"
+    if fname and up.is_dir():
+        for p in up.iterdir():
+            if p.name.endswith(fname):
+                return str(p)
+    return None
+
+
 def list_papers() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
@@ -360,6 +387,127 @@ def _rank(scores: np.ndarray) -> np.ndarray:
     ranks = np.empty_like(order)
     ranks[order] = np.arange(len(scores))
     return ranks
+
+
+# --------------------------------------------------------------------------
+# 长文档分层检索：章节级粗索引 → 块级下钻
+# --------------------------------------------------------------------------
+_sec_cache: dict = {"key": None, "meta": [], "vectors": None, "bm25": None}
+
+
+def _load_section_index() -> dict:
+    """章节级粗索引：把每篇论文的同一章节（无章节信息时按 10 页分带）聚合为一个节点。
+
+    面向 500+ 页长文档：全局 top_k 容易被少数长文的密集段落挤占，
+    先在章节级定位相关区域再下钻块级，可以显著提高长文召回的覆盖度。
+    索引与块级缓存同 key，随论文增删一起失效重建。
+    """
+    index = _load_index()
+    key = index.get("key")
+    if _sec_cache.get("key") == key and _sec_cache.get("vectors") is not None:
+        return _sec_cache
+    groups: dict[tuple, list[int]] = {}
+    for i, m in enumerate(index["meta"]):
+        if m["kind"] in ("heading", "reference"):
+            continue
+        sec = m.get("section") or f"pages {(int(m['page']) - 1) // 10 * 10 + 1}-" \
+                                   f"{(int(m['page']) - 1) // 10 * 10 + 10}"
+        groups.setdefault((m["paper_id"], sec), []).append(i)
+    meta, vecs, docs = [], [], []
+    V = index["vectors"]
+    for (pid, sec), idxs in groups.items():
+        v = V[idxs].mean(axis=0)
+        norm = float(np.linalg.norm(v)) or 1.0
+        meta.append({"paper_id": pid, "section": sec, "idxs": idxs})
+        vecs.append((v / norm).astype(np.float32))
+        docs.append(tokenize(sec + " " + " ".join(
+            index["meta"][i]["text"][:80] for i in idxs[:6])))
+    _sec_cache.update({
+        "key": key,
+        "meta": meta,
+        "vectors": np.vstack(vecs) if vecs else np.zeros((0, EMBEDDING_DIM), np.float32),
+        "bm25": BM25(docs),
+    })
+    return _sec_cache
+
+
+def hierarchical_search(query: str, paper_ids: list[str] | None = None,
+                        top_k: int = RETRIEVE_TOP_K,
+                        sections: int = 6, per_section: int = 3) -> list[dict]:
+    """长文档分层检索：章节级定位 → 块级下钻 → 与全局检索 RRF 合并。
+
+    返回结构与 hybrid_search 一致，额外带 `via` 标记命中路径。
+    """
+    index = _load_index()
+    if not index["meta"]:
+        return []
+    sec = _load_section_index()
+    if not sec["meta"]:
+        return hybrid_search(query, paper_ids, top_k)
+
+    greek = expand_greek(query)
+    rewrite = rewrite_query(query)
+    base = " ".join(x for x in (query, greek) if x)
+    qv = embed_query(" ".join(x for x in (base, rewrite) if x))
+
+    # 第一层：章节级粗排
+    sec_dense = _cosine(qv, sec["vectors"])
+    sec_bm25 = sec["bm25"].score(tokenize(base))
+    sec_comb = 1 / (60 + _rank(sec_dense)) + 1 / (60 + _rank(sec_bm25))
+    picked: list[int] = []
+    chosen_secs: set[tuple] = set()
+    for si in np.argsort(-sec_comb):
+        sm = sec["meta"][si]
+        if sec_comb[si] <= 0:
+            break
+        if paper_ids and sm["paper_id"] not in paper_ids:
+            continue
+        chosen_secs.add((sm["paper_id"], sm["section"]))
+        picked.extend(sm["idxs"])
+        if len(chosen_secs) >= sections:
+            break
+    if not picked:
+        return hybrid_search(query, paper_ids, top_k)
+
+    # 第二层：只在命中章节内做块级排序
+    picked_arr = np.array(sorted(set(picked)))
+    bm = index["bm25"].score(tokenize(base))[picked_arr]
+    dn = _cosine(qv, index["vectors"])[picked_arr]
+    sub_comb = 1 / (60 + _rank(bm)) + 1 / (60 + _rank(dn))
+    hier: list[dict] = []
+    sec_count: Counter = Counter()
+    for pos in np.argsort(-sub_comb):
+        m = index["meta"][picked_arr[pos]]
+        if m["kind"] in ("heading", "reference"):
+            continue
+        skey = (m["paper_id"], m.get("section") or "")
+        if sec_count[skey] >= per_section:
+            continue
+        sec_count[skey] += 1
+        hier.append({
+            "chunk_id": m["id"], "paper_id": m["paper_id"], "page": m["page"],
+            "bbox": json.loads(m["bbox"]) if isinstance(m["bbox"], str) else m["bbox"],
+            "section": m["section"], "kind": m["kind"], "text": m["text"],
+            "score": float(sub_comb[pos]),
+            "dense_score": float(dn[pos]), "bm25_score": float(bm[pos]),
+        })
+
+    # 与全局检索结果 RRF 合并，两种路径互相兜底
+    global_hits = hybrid_search(query, paper_ids, top_k=top_k * 3)
+    rank_g = {h["chunk_id"]: r for r, h in enumerate(global_hits)}
+    rank_h = {h["chunk_id"]: r for r, h in enumerate(hier)}
+    byid = {h["chunk_id"]: h for h in global_hits + hier}
+    merged = []
+    for cid in set(rank_g) | set(rank_h):
+        in_g, in_h = cid in rank_g, cid in rank_h
+        s = 1 / (60 + rank_g.get(cid, 100_000)) + 1 / (60 + rank_h.get(cid, 100_000))
+        h = dict(byid[cid])
+        h["score"] = s
+        h["via"] = ("hierarchical+global" if in_g and in_h
+                    else "hierarchical" if in_h else "global")
+        merged.append(h)
+    merged.sort(key=lambda x: x["score"], reverse=True)
+    return merged[:top_k]
 
 
 def index_stats() -> dict:
