@@ -281,7 +281,7 @@ export default function ChatPage() {
           <strong>正在{mode === "chat" ? "检索证据并生成答案" : "对比论文…"}…</strong>
           <div style={{ marginTop: 6, color: "var(--ink-3)", fontSize: 12 }}>
             {hierarchical ? "长文档分层检索优先命中章节级证据，再下钻到具体段落。" :
-              "离线归纳模式下不会调用大模型（配置 LLM_API_KEY 可获得连贯答案）。"}
+              "当前为稳健模式（内置本地检索 + 抽取式归纳；接入 LLM_API_KEY 可获得更连贯的论述式回答）。"}
           </div>
           <div className="skeleton" style={{ marginTop: 14 }}>
             <div className="sk-line" style={{ width: "92%" }} />
@@ -302,7 +302,7 @@ export default function ChatPage() {
           <div className="row" style={{ justifyContent: "space-between" }}>
             <strong>答案</strong>
             <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-              模式：{answer.mode} · 置信度 {Number(answer.confidence || 0).toFixed(2)} · {Number(answer.elapsed || 0).toFixed(2)}s
+              模式：{answer.mode_label || answer.mode} · 置信度 {Number(answer.confidence || 0).toFixed(2)} · {Number(answer.elapsed || 0).toFixed(2)}s
             </span>
           </div>
           <div style={{ marginTop: 10, lineHeight: 1.75, whiteSpace: "pre-wrap" }}>

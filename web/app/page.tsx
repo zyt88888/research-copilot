@@ -8,6 +8,7 @@ type Paper = {
   venue?: string; num_pages: number; created_at: string;
   arxiv_id?: string | null;
   status: string; page_flags?: Record<number, string>;
+  has_translation?: boolean;
 };
 
 // 全局缩略图 URL 缓存——避免同一 paper_id 重复请求
@@ -100,6 +101,7 @@ function PaperCard({ p }: { p: Paper }) {
         <div className="stats">
           {p.arxiv_id && <span className="chip">{p.arxiv_id}</span>}
           <span className="chip">{p.num_pages} 页</span>
+          {p.has_translation && <span className="chip" title="已生成中文译文，点击阅读可对照查看">🇨🇳 双语</span>}
           {scanned
             ? <span className="chip warn">含扫描页</span>
             : <span className="chip ok">原生文本</span>}

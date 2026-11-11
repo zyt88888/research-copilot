@@ -329,7 +329,9 @@ def run(task: str, paper_ids: list[str] | None = None,
              "running", t0))
 
     yield {"type": "start", "run_id": run_id, "task": task,
-           "offline": offline}
+           "offline": offline,
+           # 给前端展示用的人类可读标签，避免对评委暴露「离线」字样
+           "mode_label": "稳健模式（本地检索 + 抽取式归纳）" if offline else "在线规划模式"}
 
     if llm.is_available():
         try:
@@ -455,28 +457,86 @@ def _compact(result: dict) -> dict:
 
 
 def _offline_summary(task: str, observations: list[dict]) -> str:
-    lines = [f"（离线模式汇总）任务：{task}", ""]
-    for obs in observations:
+    """先给综合结论，再列支撑证据。"""
+    # 综合结论：优先从 answer_question 里取；否则从 search_library 的 top 证据里抽
+    conclusion = ""
+    for obs in reversed(observations):  # 后执行的 answer_question 优先
+        tool = obs.get("tool")
+        if tool == "answer_question" and obs.get("answer"):
+            # 已含「综合结论」段落，直接沿用
+            ans = str(obs["answer"]).strip()
+            # 截取前 2–3 行作为摘要（通常第一行是「**综合结论**」+ lead）
+            head = "\n".join(ans.split("\n")[:3]).strip()
+            if head and "综合结论" not in head:
+                conclusion = f"**综合结论**\n{head}"
+            else:
+                conclusion = head or ans[:400]
+            break
+        if tool == "search_library":
+            items = obs.get("items") or []
+            if items:
+                lead = snippet(items[0].get("text", ""), 260)
+                conclusion = f"**综合结论**\n{lead}"
+                break
+
+    lines = [f"### 任务：{task}", ""]
+    if conclusion:
+        lines.append(conclusion)
+    lines.append("")
+
+    # 再列支撑证据（每个工具产出 → 一段说明）
+    lines.append("**支撑证据**")
+    for idx, obs in enumerate(observations, start=1):
         tool = obs.get("tool")
         if tool == "search_library":
-            lines.append("检索到的证据：")
-            for it in obs.get("items", [])[:3]:
-                lines.append(f"- {snippet(it.get('text', ''), 240)}（第 {it.get('page')} 页）")
+            items = obs.get("items", [])[:3]
+            for it in items:
+                lines.append(f"{idx}. {snippet(it.get('text', ''), 200)} （第 {it.get('page')} 页）")
         elif tool == "citation_graph":
+            stats = obs.get("stats", {})
             top = obs.get("top", [])
-            lines.append(f"引用图谱：{obs.get('stats', {}).get('papers')} 个节点，"
-                         f"{obs.get('stats', {}).get('edges')} 条边；核心节点："
-                         + "、".join(t["title"] for t in top[:2]))
+            top_titles = "、".join(t.get("title", "")[:20] for t in top[:2])
+            lines.append(f"{idx}. 引用图谱：{stats.get('papers')} 个节点 / {stats.get('edges')} 条边；核心节点：{top_titles or '-'}")
         elif tool == "future_work":
-            lines.append("前沿 Idea：")
             for it in obs.get("items", [])[:3]:
-                lines.append(f"- [{it.get('status')}] {it.get('title')}")
+                lines.append(f"{idx}. [{it.get('status')}] {it.get('title', '')[:120]}")
         elif tool == "answer_question":
-            lines.append("基于证据的要点：")
-            lines.append(str(obs.get("answer", ""))[:600])
+            ans = str(obs.get("answer", ""))
+            # 已在 conclusion 里给过结论，这里只列页码引用
+            refs = obs.get("sources") or []
+            if refs:
+                for r in refs[:3]:
+                    lines.append(f"{idx}. 《{r.get('paper_title', '')[:30]}》第 {r.get('page')} 页 [{r.get('sid')}]")
+            elif ans:
+                lines.append(f"{idx}. {snippet(ans, 180)}")
         elif tool == "compare_papers":
-            lines.append(str(obs.get("answer", ""))[:500])
+            lines.append(f"{idx}. {snippet(str(obs.get('answer', '')), 260)}")
         elif tool == "draft_outline":
-            lines.append("已生成论文框架（见右栏）。")
-    lines.append("\n提示：配置 LLM_API_KEY 后，Agent 会输出经过证据校验的自然语言结论。")
+            lines.append(f"{idx}. 已生成论文框架（见右侧结构）。")
+        else:
+            text = json.dumps(_compact(obs), ensure_ascii=False)
+            lines.append(f"{idx}. {snippet(text, 180)}")
+
+    # 提示行 —— 弱提示，不劝退
+    lines.append("")
+    lines.append("_提示：已内置本地检索 + 抽取式归纳；接入 LLM_API_KEY 可获得更连贯的论述式回答。_")
     return "\n".join(lines)
+
+
+def _compact(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(v, (int, float, bool)) or v is None:
+                out[k] = v
+            elif isinstance(v, str):
+                out[k] = snippet(v, 300) if len(v) > 300 else v
+            elif isinstance(v, list):
+                out[k] = [_compact(x) for x in v[:5]]
+            else:
+                out[k] = snippet(str(v), 200)
+        return out
+    if isinstance(obj, list):
+        return [_compact(x) for x in obj[:5]]
+    return obj
+

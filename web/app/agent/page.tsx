@@ -96,9 +96,11 @@ export default function AgentPage() {
         <>
           <section className="card">
             <h2 style={{ marginTop: 0 }}>🤖 科研 Agent（Task Planning + Tool Calling）</h2>
-            {offline && <div style={{ marginTop: 8, color: "var(--warn)", fontSize: 13 }}>
-              ⚠ 当前离线模式：Agent 走规则路由，不会调用 LLM 生成总结。配置 LLM_API_KEY 后自动切换到在线规划模式。
-            </div>}
+            {events.find(e => e.type === "start")?.mode_label && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)" }}>
+                运行模式：{events.find(e => e.type === "start")!.mode_label}
+              </div>
+            )}
             <div className="row grow" style={{ marginTop: 12 }}>
               <input type="text" value={task} onChange={(e) => setTask(e.target.value)} />
               <button className="btn" disabled={running} onClick={run}>

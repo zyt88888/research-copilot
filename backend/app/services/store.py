@@ -201,6 +201,10 @@ def list_papers() -> list[dict]:
         rows = conn.execute(
             "SELECT id,title,authors,year,venue,arxiv_id,filename,num_pages,"
             "created_at,status,meta FROM papers ORDER BY created_at DESC").fetchall()
+        # 一次查询所有已翻译的论文 id（避免 N+1）
+        tx = conn.execute(
+            "SELECT DISTINCT paper_id FROM translations LIMIT 500")
+        translated = {r["paper_id"] for r in tx.fetchall()}
     out = []
     for row in rows:
         data = dict(row)
@@ -209,6 +213,7 @@ def list_papers() -> list[dict]:
         data["page_flags"] = meta.get("page_flags", {})
         data["toc"] = meta.get("toc", [])
         data["is_scanned"] = bool(meta.get("page_flags"))
+        data["has_translation"] = data["id"] in translated
         out.append(data)
     return out
 
