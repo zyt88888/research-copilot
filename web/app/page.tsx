@@ -1,4 +1,5 @@
 ﻿"use client";
+import { apiBase } from "../lib/apiBase";
 import { useEffect, useState, useRef } from "react";
 import { Empty, ErrorState, Skeleton } from "../components/State";
 
@@ -14,7 +15,7 @@ const coverCache = new Map<string, string>();
 const coverPending = new Map<string, Promise<string | null>>();
 
 async function listPapers(): Promise<Paper[]> {
-  const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers`);
+  const r = await fetch(`${apiBase()}/api/papers`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()).papers || [];
 }
@@ -24,10 +25,10 @@ async function loadCover(paperId: string): Promise<string | null> {
   if (coverPending.has(paperId)) return coverPending.get(paperId)!;
   const p = (async () => {
     try {
-      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/thumbnails/${paperId}`, { cache: "force-cache" });
+      const r = await fetch(`${apiBase()}/api/thumbnails/${paperId}`, { cache: "force-cache" });
       if (!r.ok) return null;
       const j = await r.json();
-      const url = j.image_url ? `${process.env.NEXT_PUBLIC_BACKEND}${j.image_url}` : null;
+      const url = j.image_url ? `${apiBase()}${j.image_url}` : null;
       if (url) coverCache.set(paperId, url);
       return url;
     } catch { return null; }
@@ -119,6 +120,7 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [job, setJob] = useState<any>(null);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const [dup, setDup] = useState<any>(null);
   const [diff, setDiff] = useState<any>(null);
@@ -137,7 +139,7 @@ export default function LibraryPage() {
     if (!q) return;
     setArxivBusy(true); setArxivMsg(null); setArxivCands(null);
     try {
-      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/discover?query=${encodeURIComponent(q)}&limit=8&source=${searchSrc}`);
+      const r = await fetch(`${apiBase()}/api/papers/discover?query=${encodeURIComponent(q)}&limit=8&source=${searchSrc}`);
       if (!r.ok) throw new Error(`检索失败（HTTP ${r.status}）`);
       const j = await r.json();
       setArxivCands(j.candidates || []);
@@ -152,7 +154,7 @@ export default function LibraryPage() {
     try {
       const fd = new FormData();
       fd.append("arxiv_id", id);
-      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/fetch-arxiv`, { method: "POST", body: fd });
+      const r = await fetch(`${apiBase()}/api/papers/fetch-arxiv`, { method: "POST", body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j.detail || `下载失败（HTTP ${r.status}）`);
       if (j.status === "ok") {
@@ -187,49 +189,72 @@ export default function LibraryPage() {
 
   async function handleFiles(files: FileList | null) {
     if (!files || !files.length) return;
-    setUploading(true); setDup(null); setDiff(null); setUploadErr(null);
+    setUploading(true); setDup(null); setDiff(null); setUploadErr(null); setJob(null);
     try {
       const fd = new FormData();
       fd.append("file", files[0]);
-      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/upload`, { method: "POST", body: fd });
-      if (!r.ok) throw new Error(`上传失败（HTTP ${r.status}）`);
+      const r = await fetch(`${apiBase()}/api/papers/upload`, { method: "POST", body: fd });
       const j = await r.json();
-      if (j.status === "ok") {
+      if (!r.ok) throw new Error(j.detail || `上传失败（HTTP ${r.status}）`);
+      if (j.status === "ok") { await refresh(true); return; }
+      if (j.status === "duplicate") { await resolveDuplicate(j.job_id, j.duplicate, j.version_diff); return; }
+      if (!j.job_id) { setUploadErr(j.detail || JSON.stringify(j).slice(0, 200)); return; }
+
+      // 后端已改为「上传即返回、后台解析」，这里轮询进度，
+      // 大文件解析期间全站仍可用，也能看到逐页进度而不是一直转圈。
+      let last: any = null;
+      for (let i = 0; i < 1800; i++) {
+        await new Promise(res => setTimeout(res, 800));
+        const jr = await fetch(`${apiBase()}/api/papers/jobs/${j.job_id}`);
+        if (!jr.ok) throw new Error(`进度查询失败（HTTP ${jr.status}）`);
+        last = await jr.json();
+        setJob(last);
+        if (last.status !== "parsing" && last.status !== "queued") break;
+      }
+      if (!last) throw new Error("解析超时，请稍后在文库刷新查看");
+      if (last.status === "done") {
+        setJob(null);
         await refresh(true);
-        return;
+      } else if (last.status === "duplicate") {
+        setJob(null);
+        await resolveDuplicate(j.job_id, last.duplicate, last.version_diff);
+      } else if (last.status === "error") {
+        throw new Error(last.message || "解析失败");
+      } else {
+        throw new Error("解析超时，任务仍在后台继续，稍后刷新文库即可");
       }
-      if (j.status === "duplicate") {
-        setDup(j); setDiff(j.version_diff);
-        // 同 arXiv family：让用户选择覆盖旧版，或把新版作为独立条目并存
-        if (j.duplicate?.same_arxiv_family) {
-          const d = j.duplicate;
-          const isSameVer = (d.incoming_version || 0) <= (d.existing_version || 0);
-          const head = isSameVer
-            ? `库中已有 arXiv ${d.arxiv_id} v${d.existing_version}，这与它是同一版本（相似度 ${Math.round((d.similarity || 0) * 100)}%）。要用这份文件覆盖旧记录吗？`
-            : `检测到 arXiv ${d.arxiv_id} 的更新版本 v${d.incoming_version}（库中现有 v${d.existing_version}）。要用新版覆盖旧版吗？`;
-          const overwrite = await confirm(`${head}\n点确定=覆盖旧记录，点取消=保留旧记录`);
-          const fd2 = new FormData();
-          fd2.append("file", files[0]);
-          if (overwrite) {
-            fd2.append("overwrite_id", d.paper_id);
-          } else {
-            const keepBoth = await confirm(
-              `要把这一份也作为独立条目并存吗？\n点确定=并存（可在版本比对里对比），点取消=不入库`);
-            if (!keepBoth) { await refresh(true); return; }
-            fd2.append("force", "true");
-          }
-          const r2 = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/upload`, { method: "POST", body: fd2 });
-          if (!r2.ok) throw new Error(`入库失败（HTTP ${r2.status}）`);
-          await refresh(true);
-        }
-        return;
-      }
-      setUploadErr(j.detail || JSON.stringify(j));
     } catch (e) {
       setUploadErr(e instanceof Error ? e.message : String(e));
     } finally {
       setUploading(false);
     }
+  }
+
+  // 重复文献确认：同 arXiv family 让用户选「覆盖 / 并存 / 不入库」，
+  // 落库复用后台已完成的解析结果（commit），不再重新解析。
+  async function resolveDuplicate(jobId: string | undefined, d: any, diff: any) {
+    setDup({ duplicate: d, version_diff: diff, suggestion: d?.suggestion });
+    setDiff(diff);
+    if (!d?.same_arxiv_family) { await refresh(true); return; }
+    const isSameVer = (d.incoming_version || 0) <= (d.existing_version || 0);
+    const head = isSameVer
+      ? `库中已有 arXiv ${d.arxiv_id} v${d.existing_version}，这与它是同一版本（相似度 ${Math.round((d.similarity || 0) * 100)}%）。要用这份文件覆盖旧记录吗？`
+      : `检测到 arXiv ${d.arxiv_id} 的更新版本 v${d.incoming_version}（库中现有 v${d.existing_version}）。要用新版覆盖旧版吗？`;
+    const overwrite = await confirm(`${head}\n点确定=覆盖旧记录，点取消=保留旧记录`);
+    const fd = new FormData();
+    if (overwrite) {
+      fd.append("overwrite_id", d.paper_id);
+    } else {
+      const keepBoth = await confirm(
+        `要把这一份也作为独立条目并存吗？\n点确定=并存（可在版本比对里对比），点取消=不入库`);
+      if (!keepBoth) { await refresh(true); return; }
+      fd.append("force", "true");
+    }
+    if (!jobId) throw new Error("任务已过期，请重新上传该文件");
+    const r = await fetch(`${apiBase()}/api/papers/jobs/${jobId}/commit`,
+      { method: "POST", body: fd });
+    if (!r.ok) throw new Error(`入库失败（HTTP ${r.status}）`);
+    await refresh(true);
   }
 
   return (
@@ -252,7 +277,30 @@ export default function LibraryPage() {
         </div>
         {uploading && (
           <div style={{ marginTop: 12 }}>
-            <Skeleton rows={2} />
+            {job && job.pages_total > 0 ? (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5,
+                  color: "var(--ink-2)", marginBottom: 6 }}>
+                  <span>{job.stage || "解析中"} · {job.pages_done}/{job.pages_total} 页</span>
+                  <span>{job.elapsed}s</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 99, background: "#eef2ff", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${Math.min(100, Math.round(
+                    (job.pages_done / Math.max(1, job.pages_total)) * 100))}%`,
+                    background: "var(--brand-grad, var(--brand))", transition: "width .3s" }} />
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>
+                  解析在后台进行，你可以先去问答或阅读其他论文，完成后文库会自动刷新。
+                </div>
+              </div>
+            ) : (
+              <div>
+                <Skeleton rows={2} />
+                <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 6 }}>
+                  {job?.stage || "上传中，正在建立解析任务…"}
+                </div>
+              </div>
+            )}
           </div>
         )}
         {uploadErr && (

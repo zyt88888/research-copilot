@@ -4,7 +4,8 @@
 // 这里用 Route Handler 透传 upstream.body，保证逐事件到达前端。
 export const dynamic = "force-dynamic";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND || "http://localhost:8000";
+// 服务端转发用的是容器内网地址（web 容器里的 localhost 不是后端）
+const BACKEND = process.env.BACKEND_INTERNAL || "http://backend:8000";
 
 export async function POST(req: Request) {
   const body = await req.text();

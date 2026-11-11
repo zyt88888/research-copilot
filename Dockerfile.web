@@ -10,7 +10,7 @@ COPY web/package.json web/package-lock.json* ./
 RUN npm install --no-audit --no-fund
 
 COPY web .
-ENV NEXT_PUBLIC_BACKEND=http://localhost:8000
+ENV NEXT_PUBLIC_BACKEND=http://127.0.0.1:8000
 RUN npm run build
 
 # --- Runtime：只装生产依赖 ---

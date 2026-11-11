@@ -14,7 +14,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 
 from ..settings import (CACHE_DIR, CHUNK_OVERLAP, CHUNK_SIZE, OCR_ENABLED,
-                        OCR_LANG)
+                        OCR_LANG, OCR_MAX_PAGES)
 from ..utils import (CAPTION, MATH_HINT, REF_HEADING, bbox_union, chunk_text,
                      exact_content_hash, extract_year, is_math_line,
                      minhash_signature, norm_ws, safe_filename, snippet,
@@ -79,13 +79,20 @@ def ocr_page(page: "fitz.Page") -> str | None:
     if not engine:
         return None
     try:
-        pix = page.get_pixmap(dpi=200)
+        # 扫描件 OCR：150dpi 对印刷体识别率几乎无损，但像素量只有 200dpi 的 56%，
+        # 大文档逐页识别能快近一倍；长边再限制到 1600px 兜住超大页面。
+        pix = page.get_pixmap(dpi=150)
         if engine[0] == "paddle3":
             import numpy as np
             img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
                 pix.height, pix.width, pix.n)
             if pix.n == 4:  # 去掉 alpha 通道
                 img = img[:, :, :3]
+            if max(pix.height, pix.width) > 1600:
+                from PIL import Image
+                scale = 1600 / max(pix.height, pix.width)
+                img = np.asarray(Image.fromarray(img).resize(
+                    (int(pix.width * scale), int(pix.height * scale))))
             lines = []
             for res in engine[1].predict(img) or []:
                 texts = res.get("rec_texts") if hasattr(res, "get") else None
@@ -348,7 +355,19 @@ def _year_from_arxiv(arxiv_id: str | None) -> int | None:
 # --------------------------------------------------------------------------
 # 主解析流程
 # --------------------------------------------------------------------------
-def _extract(path: Path, filename: str) -> dict:
+def _blocks_text(blocks) -> str:
+    """把 get_text("dict") 的文本块拼回纯文本（等价于 get_text("text")，
+    但省掉一次页面内容流解析）。"""
+    parts: list[str] = []
+    for b in blocks:
+        if b.get("type") != 0:
+            continue
+        for line in b.get("lines", []):
+            parts.append("".join(s.get("text", "") for s in line.get("spans", [])))
+    return "\n".join(parts)
+
+
+def _extract(path: Path, filename: str, on_progress=None) -> dict:
     doc = fitz.open(path)
     meta = doc.metadata or {}
     pages_meta: list[dict] = []
@@ -358,17 +377,43 @@ def _extract(path: Path, filename: str) -> dict:
     body_sizes: list[float] = []
     ocr_first_page = ""   # 第 1 页 OCR 原文，供标题兜底
 
-    raw_pages = []
-    for page in doc:
-        blocks = page.get_text("dict").get("blocks", [])
-        raw_pages.append((page, blocks))
+    total_pages = doc.page_count
+    ocr_used = 0
+    ocr_skipped = 0
+    last_kind = "layout"
+
+    def _report(done: int, kind: str | None = None, total: int | None = None) -> None:
+        if not on_progress:
+            return
+        try:
+            on_progress(done, total or total_pages, kind or last_kind)
+        except Exception:  # 进度回调异常不能影响解析
+            pass
+
+    # 字号采样：大文档不逐页做版式分析（541 页扫描书单这一遍就要 2 分钟），
+    # 均匀采样最多 45 页估计正文字号与标题字号，对章节层级判断足够稳。
+    if total_pages <= 60:
+        sample_idx = list(range(total_pages))
+    else:
+        step = (total_pages - 1) / 44
+        sample_idx = sorted({int(round(i * step)) for i in range(45)} | {0})
+
+    raw_pages = []          # 只保留首页，供标题/作者兜底
+    _report(0, "layout")
+    for n, i in enumerate(sample_idx, start=1):
+        blocks = doc[i].get_text("dict").get("blocks", [])
+        if i == 0:
+            raw_pages.append((doc[0], blocks))
         body_sizes.append(_body_size(blocks))
+        if n % 5 == 0:
+            _report(n, "layout", len(sample_idx))
 
     global_body = statistics.median([b for b in body_sizes if b > 0] or [10.0])
 
-    # 标题层级：按字号聚类（只取正文 1.14 倍以上的字号）
+    # 标题层级：按字号聚类（只取正文 1.14 倍以上的字号，采样页统计）
     heading_sizes = set()
-    for page, blocks in raw_pages:
+    for i in sample_idx:
+        blocks = doc[i].get_text("dict").get("blocks", [])
         for b in blocks:
             if b.get("type") != 0:
                 continue
@@ -377,6 +422,7 @@ def _extract(path: Path, filename: str) -> dict:
                 heading_sizes.add(round(info["size"], 1))
     ranked = {size: min(i + 1, 3) for i, size in
               enumerate(sorted(heading_sizes, reverse=True))}
+
 
     section_stack: list[tuple[int, str]] = []
     toc: list[dict] = []
@@ -410,14 +456,27 @@ def _extract(path: Path, filename: str) -> dict:
         seq += 1
         return chunk
 
-    for idx, (page, blocks) in enumerate(raw_pages, start=1):
+    last_kind = "text"
+    for idx, page in enumerate(doc, start=1):
+        _report(idx - 1)
+        blocks = page.get_text("dict").get("blocks", [])
         width, height = page.rect.width, page.rect.height
         pages_meta.append({"page": idx, "width": round(width, 2),
                            "height": round(height, 2)})
-        raw_text = page.get_text("text")
+        # 直接从版式块拼文本，省掉第二次 get_text("text")：
+        # 对矢量图形特别重的页（实测 5–7s/页）能省掉近一半解析时间
+        raw_text = _blocks_text(blocks)
         page_texts.append(raw_text)
 
         if len(raw_text.strip()) < OCR_MIN_CHARS:
+            # OCR 预算：单篇超过 OCR_MAX_PAGES 页后不再识别，避免整本扫描书
+            # 连续占用十几分钟 CPU（其余页标 needs_ocr，文字层仍可检索）
+            if ocr_used >= OCR_MAX_PAGES:
+                page_flags[idx] = "needs_ocr"
+                ocr_skipped += 1
+                continue
+            ocr_used += 1
+            last_kind = "ocr"
             ocr_text = ocr_page(page)
             if ocr_text and len(ocr_text.strip()) >= OCR_MIN_CHARS:
                 page_flags[idx] = "ocr"
@@ -515,6 +574,7 @@ def _extract(path: Path, filename: str) -> dict:
             for t in tables:
                 add_chunk(t["text"], idx, t["bbox"], "table")
 
+    _report(total_pages)
     full_text = "\n".join(page_texts)
     first_page_text = page_texts[0] if page_texts else ""
     arxiv_match = ARXIV_ID.search(first_page_text) or ARXIV_ID.search(full_text[:4000])
@@ -593,6 +653,8 @@ def _extract(path: Path, filename: str) -> dict:
         "content_hash": content_hash,
         "minhash": signature,
         "full_text_chars": len(full_text),
+        "ocr_pages": ocr_used,
+        "ocr_skipped": ocr_skipped,
     }
 
 
@@ -749,8 +811,11 @@ def _tail_references(full_text: str) -> str:
     return full_text[m.end():] if m else ""
 
 
-def parse_pdf(path: Path, filename: str | None = None) -> dict:
-    """带磁盘缓存：同一文件重复上传（去重确认场景）不重复解析。"""
+def parse_pdf(path: Path, filename: str | None = None, on_progress=None) -> dict:
+    """带磁盘缓存：同一文件重复上传（去重确认场景）不重复解析。
+
+    on_progress(done_pages, total_pages, kind)：逐页回调，供上传任务显示进度。
+    """
     path = Path(path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     cache_file = CACHE_DIR / f"{digest}.json"
@@ -758,10 +823,16 @@ def parse_pdf(path: Path, filename: str | None = None) -> dict:
         try:
             data = json.loads(cache_file.read_text("utf-8"))
             data["filename"] = filename or data.get("filename")
+            if on_progress:
+                try:
+                    on_progress(data.get("num_pages") or 1,
+                                data.get("num_pages") or 1, "cached")
+                except Exception:
+                    pass
             return data
         except Exception:
             pass
-    data = _extract(path, filename or path.name)
+    data = _extract(path, filename or path.name, on_progress=on_progress)
     data["file_sha256"] = digest
     try:
         cache_file.write_text(json.dumps(data, ensure_ascii=False), "utf-8")

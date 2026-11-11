@@ -49,6 +49,10 @@ REF_MATCH_THRESHOLD = float(os.getenv("REF_MATCH_THRESHOLD", "0.72"))
 # ---- OCR：可选依赖，未安装时扫描页会被标记而非静默失败 ----
 OCR_ENABLED = os.getenv("OCR_ENABLED", "1") != "0"
 OCR_LANG = os.getenv("OCR_LANG", "ch")
+# 单篇 PDF 最多 OCR 的页数。PaddleOCR 约 3–5s/页（150dpi），整本扫描教材
+# （几百页）若不设上限会连续识别十几分钟；超出部分标记为待识别，
+# 已识别的页仍可正常检索。
+OCR_MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "40"))
 
 CORS_ORIGINS = [o.strip() for o in os.getenv(
     "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"

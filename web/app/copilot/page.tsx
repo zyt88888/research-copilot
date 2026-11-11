@@ -1,4 +1,5 @@
 ﻿"use client";
+import { apiBase } from "../../lib/apiBase";
 import { useState } from "react";
 import { ErrorState, SkeletonCard } from "../../components/State";
 
@@ -14,7 +15,7 @@ export default function CopilotPage() {
   async function run(endpoint: string, body: any) {
     setLoading(true); setErr(null);
     try {
-      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/copilot/${endpoint}`, {
+      const r = await fetch(`${apiBase()}/api/copilot/${endpoint}`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });

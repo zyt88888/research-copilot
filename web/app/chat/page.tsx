@@ -1,4 +1,5 @@
 ﻿"use client";
+import { apiBase } from "../../lib/apiBase";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Empty, ErrorState, SkeletonCard } from "../../components/State";
 
@@ -29,7 +30,7 @@ export default function ChatPage() {
   async function loadPapers() {
     setPapersLoading(true); setPapersErr(null);
     try {
-      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers`);
+      const r = await fetch(`${apiBase()}/api/papers`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       setPapers(j.papers || []);
@@ -41,6 +42,21 @@ export default function ChatPage() {
   }
 
   useEffect(() => { loadPapers(); }, []);
+
+  // 支持 /chat?id=xxx（文库卡片「问答」入口）预选指定论文
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = new URLSearchParams(window.location.search).get("id");
+    if (id) setSelected([id]);
+  }, []);
+
+  // 生成耗时计时：大模型回答通常 10–30s，给出秒数避免看起来像卡死
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!loading) { setElapsed(0); return; }
+    const t = setInterval(() => setElapsed(v => v + 1), 1000);
+    return () => clearInterval(t);
+  }, [loading]);
 
   const selPapers = useMemo(() => papers.filter(p => selected.includes(p.id)), [papers, selected]);
 
@@ -56,7 +72,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!panelPaperId) { setChunks(null); return; }
     setChunks(null); setChunksErr(null); setPage(1);
-    fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers/${panelPaperId}/chunks`).then(r => {
+    fetch(`${apiBase()}/api/papers/${panelPaperId}/chunks`).then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     }).then(j => setChunks(j.chunks || []))
@@ -83,7 +99,7 @@ export default function ChatPage() {
     if (mode === "compare" && selected.length < 2) { alert("至少选 2 篇论文对比"); return; }
     setLoading(true); setAnswer(null); setAnswerErr(null);
     try {
-      const url = mode === "chat" ? `${process.env.NEXT_PUBLIC_BACKEND}/api/chat` : `${process.env.NEXT_PUBLIC_BACKEND}/api/compare`;
+      const url = mode === "chat" ? `${apiBase()}/api/chat` : `${apiBase()}/api/compare`;
       const body = mode === "chat"
         ? { query, paper_ids: selected.length ? selected : null, top_k: 8, hierarchical }
         : { paper_ids: selected, aspect };
@@ -116,6 +132,14 @@ export default function ChatPage() {
             </button>
           )}
           <span style={{ color: "var(--ink-3)", fontSize: 13 }}>已选 {selected.length} 篇</span>
+          {papers.length > 0 && (
+            <>
+              <button className="btn ghost" style={{ padding: "2px 10px", fontSize: 12 }}
+                onClick={() => setSelected(papers.map(p => p.id))}>全选</button>
+              <button className="btn ghost" style={{ padding: "2px 10px", fontSize: 12 }}
+                disabled={!selected.length} onClick={() => setSelected([])}>清空</button>
+            </>
+          )}
         </div>
         {papersLoading ? (
           <div className="skeleton" style={{ marginTop: 12 }}>
@@ -130,18 +154,23 @@ export default function ChatPage() {
             desc="先到文库上传 PDF，再回来提问或做多论文对比。"
             action={<a className="btn ghost" href="/">前往文库</a>} />
         ) : (
-          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {papers.map(p => (
-              <label key={p.id} className="chip"
-                style={{ padding: "4px 10px", cursor: "pointer",
-                  background: selected.includes(p.id) ? "var(--accent)" : "#f1f5f9",
-                  color: selected.includes(p.id) ? "#fff" : "var(--ink-2)" }}>
-                <input type="checkbox" hidden checked={selected.includes(p.id)}
-                  onChange={(e) => setSelected(sel => e.target.checked ? [...sel, p.id] : sel.filter(x => x !== p.id))} />
-                {p.title?.slice(0, 48)} {p.year ? `(${p.year})` : ""}
-              </label>
-            ))}
-          </div>
+          <>
+            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {papers.map(p => (
+                <label key={p.id} className="chip"
+                  style={{ padding: "4px 10px", cursor: "pointer",
+                    background: selected.includes(p.id) ? "var(--accent)" : "#f1f5f9",
+                    color: selected.includes(p.id) ? "#fff" : "var(--ink-2)" }}>
+                  <input type="checkbox" hidden checked={selected.includes(p.id)}
+                    onChange={(e) => setSelected(sel => e.target.checked ? [...sel, p.id] : sel.filter(x => x !== p.id))} />
+                  {p.title?.slice(0, 48)} {p.year ? `(${p.year})` : ""}
+                </label>
+              ))}
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)" }}>
+              点选论文可只在这几篇里检索；不选则检索全库（{papers.length} 篇）。
+            </div>
+          </>
         )}
         <div className="row grow" style={{ marginTop: 12 }}>
           {mode === "chat" ? (
@@ -167,7 +196,10 @@ export default function ChatPage() {
         </div>
       </section>
 
-      {loading && <SkeletonCard rows={6} label="正在检索证据并生成答案…" />}
+      {loading && (
+        <SkeletonCard rows={6}
+          label={`正在检索证据并生成答案… ${elapsed}s（大模型生成通常 10–30s，可先切到别的页面）`} />
+      )}
 
       {answerErr && (
         <div className="card">
@@ -193,7 +225,7 @@ export default function ChatPage() {
               <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>
                 🖼 图 {answer.figure.n}（第 {answer.figure.page} 页裁剪原图）
               </div>
-              <img src={`${process.env.NEXT_PUBLIC_BACKEND}${answer.figure.image_url}`} alt={`图 ${answer.figure.n}`}
+              <img src={`${apiBase()}${answer.figure.image_url}`} alt={`图 ${answer.figure.n}`}
                 style={{ maxWidth: "100%", border: "1px solid var(--line)", borderRadius: 8 }} />
               {answer.figure.ocr_text && (
                 <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)" }}>

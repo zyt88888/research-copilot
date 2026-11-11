@@ -1,4 +1,5 @@
 ﻿"use client";
+import { apiBase } from "../../lib/apiBase";
 import { useEffect, useState } from "react";
 import { Empty, ErrorState, Skeleton } from "../../components/State";
 
@@ -33,7 +34,7 @@ export default function ComparePage() {
 
   useEffect(() => {
     setLoading(true); setErr(null);
-    fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/papers`).then(r => {
+    fetch(`${apiBase()}/api/papers`).then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     }).then(j => {
@@ -67,7 +68,7 @@ export default function ComparePage() {
     if (!oldId || !newId || oldId === newId) return;
     setDiffLoading(true); setDiffErr(null); setDiff(null); setLlmCompare(null);
     try {
-      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/compare/version-diff`, {
+      const r = await fetch(`${apiBase()}/api/compare/version-diff`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ old_id: oldId, new_id: newId }),
       });
@@ -82,7 +83,7 @@ export default function ComparePage() {
     if (!oldId || !newId) return;
     setLlmLoading(true); setLlmCompare(null);
     try {
-      const r = await fetch(`${process.env.NEXT_PUBLIC_BACKEND}/api/compare`, {
+      const r = await fetch(`${apiBase()}/api/compare`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ paper_ids: [oldId, newId], aspect }),
       });
