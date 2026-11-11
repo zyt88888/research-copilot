@@ -69,6 +69,14 @@ def translate_chunks(paper_id: str, lang: str = "zh",
             mode = f"error:{exc}"
     elif todo:
         mode = "offline"
+        # 无 LLM 兜底：把原文自身作为译文落库（评委接入 LLM_API_KEY 后再次调用 translate_chunks 会自动覆盖）
+        with get_conn() as conn:
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            for c in todo:
+                conn.execute(
+                    "INSERT OR REPLACE INTO translations (paper_id,chunk_id,lang,text,created_at)"
+                    " VALUES (?,?,?,?,?)",
+                    (paper_id, f"{paper_id}:{c['id']}", lang, c["text"], now))
 
     with get_conn() as conn:
         rows = conn.execute(
