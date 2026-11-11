@@ -77,8 +77,10 @@ export default function ChatPage() {
   // 载入面板论文的分块（切换面板论文时同时清掉高亮 / 翻译）
   useEffect(() => {
     if (!panelPaperId) { setChunks(null); setPanelHit(null); setPanelBbox(null); setPanelTrans({}); return; }
-    setChunks(null); setChunksErr(null); setPage(1);
-    setPanelHit(null); setPanelBbox(null); setPanelTrans({});
+    setChunks(null); setChunksErr(null);
+    // 带着证据定位跳转时不要重置页码，否则会从第 1 页重来
+    if (!panelBbox) setPage(1);
+    setPanelHit(null); setPanelTrans({});
     fetch(`${apiBase()}/api/papers/${panelPaperId}/chunks`).then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
@@ -121,20 +123,27 @@ export default function ChatPage() {
     }
   }, [chunks, panelBbox]);
 
-  // 双语：切换 / 面板论文变化时拉翻译
+  // 双语：按当前页段落精准拉取译文（长文档用分段上限会整页缺失）
   useEffect(() => {
     if (!panelPaperId || !chunks) return;
-    if (panelLang === "zh") {
-      fetch(`${apiBase()}/api/translate`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode: "paper", paper_id: panelPaperId, lang: "zh", limit: 500 }),
-      }).then(r => r.json()).then(j => {
-        const map: Record<string, string> = {};
-        for (const item of j.items || []) map[item.chunk_id] = item.translation;
-        setPanelTrans(map);
-      }).catch(() => { setPanelTrans({}); });
-    } else { setPanelTrans({}); }
-  }, [panelLang, panelPaperId, chunks]);
+    if (panelLang !== "zh") { setPanelTrans({}); return; }
+    const ids = chunks
+      .filter(c => c.page === page && ["paragraph", "ocr", "caption"].includes(c.kind))
+      .map(c => c.id.split(":").pop() as string);
+    if (!ids.length) return;
+    let alive = true;
+    fetch(`${apiBase()}/api/translate`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "paper", paper_id: panelPaperId, lang: "zh",
+        chunk_ids: ids, limit: 300 }),
+    }).then(r => r.json()).then(j => {
+      if (!alive) return;
+      const map: Record<string, string> = {};
+      for (const item of j.items || []) map[item.chunk_id] = item.translation;
+      setPanelTrans(prev => ({ ...prev, ...map }));
+    }).catch(() => { if (alive) setPanelTrans({}); });
+    return () => { alive = false; };
+  }, [panelLang, panelPaperId, chunks, page]);
 
   const pages = useMemo(() => {
     if (!chunks) return [];
@@ -281,7 +290,7 @@ export default function ChatPage() {
           <strong>正在{mode === "chat" ? "检索证据并生成答案" : "对比论文…"}…</strong>
           <div style={{ marginTop: 6, color: "var(--ink-3)", fontSize: 12 }}>
             {hierarchical ? "长文档分层检索优先命中章节级证据，再下钻到具体段落。" :
-              "当前为稳健模式（内置本地检索 + 抽取式归纳；接入 LLM_API_KEY 可获得更连贯的论述式回答）。"}
+              "正在检索本地文献、按证据归纳结论…"}
           </div>
           <div className="skeleton" style={{ marginTop: 14 }}>
             <div className="sk-line" style={{ width: "92%" }} />
@@ -319,12 +328,14 @@ export default function ChatPage() {
                     // 面板正在展示这篇论文时，点击证据直接在面板内定位并高亮，不打断当前页面
                     if (showPanel && s.paper_id === panelPaperId) {
                       e.preventDefault();
-                      if (s.bbox?.length === 4) setPanelBbox(s.bbox);
+                      // 没有 bbox 时必须清空旧值，否则会定位到上一条证据的位置
+                      setPanelBbox(s.bbox?.length === 4 ? s.bbox : null);
                       setPage(s.page);
                     } else if (showPanel && s.paper_id !== panelPaperId) {
                       // 面板展示不同论文时，先切论文再触发定位
                       e.preventDefault();
                       setPanelBbox(s.bbox?.length === 4 ? s.bbox : null);
+                      setPage(s.page);
                       setPanelPaperId(s.paper_id);
                     }
                   }}>
@@ -355,7 +366,7 @@ export default function ChatPage() {
               <button className={`btn ghost ${panelLang === "zh" ? "chip" : ""}`}
                 style={{ padding: "2px 8px", fontSize: 12 }}
                 onClick={() => setPanelLang(panelLang === "zh" ? "en" : "zh")}>
-                {panelLang === "zh" ? "🔄 显示中文译文" : "🔄 隐藏译文"}
+                {panelLang === "zh" ? "🔄 隐藏中文译文" : "🔄 显示中文译文"}
               </button>
               <a className="chip ghost" style={{ fontSize: 12, padding: "2px 8px" }}
                 href={`/reader?id=${panelPaperId}&page=${page}${panelBbox?.length ? `#bbox=${panelBbox.join(",")}` : ""}`}

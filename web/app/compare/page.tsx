@@ -217,7 +217,7 @@ export default function ComparePage() {
           <section className="card">
             <h3 style={{ marginTop: 0 }}>🧠 LLM 多维对比</h3>
             <p style={{ color: "var(--ink-3)", fontSize: 13 }}>
-              让 LLM 从指定维度对两篇论文做定性对比（需要配置 LLM_API_KEY）。
+              从指定维度对两篇论文做定性对比（本地稳健模式下使用证据抽取式对比）。
             </p>
             <div className="row grow" style={{ marginTop: 10 }}>
               <input type="text" value={aspect} onChange={(e) => setAspect(e.target.value)}

@@ -29,6 +29,16 @@ RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(lang='ch', use_doc_ori
     && ls /root/.paddlex/official_models | grep -q det \
     && ls /root/.paddlex/official_models | grep -q rec
 
+# 预下载中英翻译模型（Helsinki-NLP/opus-mt-en-zh，约 300 MB）
+# 让「双语对照」无需任何 API Key、断网也能用；独立成层，代码改动不触发重下载
+ENV HF_ENDPOINT=https://hf-mirror.com \
+    HF_HOME=/opt/hf
+RUN pip install --no-cache-dir --retries 5 --timeout 120 sentencepiece \
+    && python -c "from transformers import AutoModelForSeq2SeqLM, AutoTokenizer; \
+        AutoTokenizer.from_pretrained('Helsinki-NLP/opus-mt-en-zh'); \
+        AutoModelForSeq2SeqLM.from_pretrained('Helsinki-NLP/opus-mt-en-zh')" \
+    && ls /opt/hf | grep -q hub
+
 # 复制代码
 COPY backend /app
 

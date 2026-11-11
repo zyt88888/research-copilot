@@ -34,6 +34,7 @@ function Inner() {
   const [pickResult, setPickResult] = useState<{ text: string; mode: string } | null>(null);
   const [pickLoading, setPickLoading] = useState(false);
   const [evidence, setEvidence] = useState(false);
+  const [hitExact, setHitExact] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [repro, setRepro] = useState<any>(null);
@@ -103,9 +104,6 @@ function Inner() {
     if (!pid) return;
     setErr(null);
     // 支持 /reader?id=&page=#bbox=x0,y0,x1,y1 的引用深链
-    const raw = params.get("bbox")
-      || (window.location.hash.startsWith("#bbox=") ? window.location.hash.slice(6) : "");
-    const nums = raw ? raw.split(",").map(Number) : [];
     Promise.all([
       fetch(`${apiBase()}/api/papers/${pid}`).then(r => {
         if (!r.ok) throw new Error(`论文信息载入失败（HTTP ${r.status}）`);
@@ -119,15 +117,32 @@ function Inner() {
       setMeta(m); setChunks(c.chunks || []);
       const p = Math.min(Math.max(wantPage || 1, 1), m.num_pages || 1);
       setPage(p - 1);
-      if (nums.length === 4 && nums.every(n => Number.isFinite(n))) {
-        const target = (c.chunks as Chunk[]).find(ch =>
-          ch.page === p && ch.bbox?.length === 4 &&
-          Math.abs(ch.bbox[0] - nums[0]) < 3 && Math.abs(ch.bbox[1] - nums[1]) < 3 &&
-          Math.abs(ch.bbox[2] - nums[2]) < 4 && Math.abs(ch.bbox[3] - nums[3]) < 4);
-        if (target) { setHit(target.id); setEvidence(true); }
-      }
     }).catch(e => setErr(e instanceof Error ? e.message : String(e)));
   }, [pid, reloadKey]);
+
+  // 证据深链定位：分块就绪后按 bbox 精确定位；匹配不到则回退到该页首个段落，
+  // 保证「点击证据 → 打开对应页并高亮」不会静默失效
+  useEffect(() => {
+    if (!pid || !meta || !chunks.length) return;
+    const raw = params.get("bbox")
+      || (window.location.hash.startsWith("#bbox=") ? window.location.hash.slice(6) : "");
+    const nums = raw ? raw.split(",").map(Number) : [];
+    if (nums.length !== 4 || !nums.every(n => Number.isFinite(n))) return;
+    const p = Math.min(Math.max(wantPage || 1, 1), meta.num_pages || 1);
+    const target = chunks.find(ch =>
+      ch.page === p && ch.bbox?.length === 4 &&
+      Math.abs(ch.bbox[0] - nums[0]) < 3 && Math.abs(ch.bbox[1] - nums[1]) < 3 &&
+      Math.abs(ch.bbox[2] - nums[2]) < 4 && Math.abs(ch.bbox[3] - nums[3]) < 4);
+    if (target) {
+      setHit(target.id); setHitExact(true); setEvidence(true); setPage(p - 1);
+      return;
+    }
+    const fallback = chunks.find(ch => ch.page === p &&
+      ["paragraph", "ocr", "caption"].includes(ch.kind));
+    if (fallback) {
+      setHit(fallback.id); setHitExact(false); setEvidence(true); setPage(p - 1);
+    }
+  }, [pid, meta, chunks, wantPage]);
 
   // 命中证据块后滚动到可视区域居中
   useEffect(() => {
@@ -140,17 +155,24 @@ function Inner() {
 
   useEffect(() => {
     if (!pid || !meta) return;
-    if (lang === "zh") {
-      fetch(`${apiBase()}/api/translate`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode: "paper", paper_id: pid, lang: "zh", limit: 80 }),
-      }).then(r => r.json()).then(j => {
-        const map: Record<string, string> = {};
-        for (const item of j.items || []) map[item.chunk_id] = item.translation;
-        setTrans(map);
-      }).catch(() => setTrans({}));
-    } else { setTrans({}); }
-  }, [lang, pid, meta]);
+    if (lang !== "zh") { setTrans({}); return; }
+    // 只取当前页的可译段落，避免长文档因分段上限而整页无译文
+    const ids = chunks
+      .filter(c => c.page === page + 1 && ["paragraph", "ocr", "caption"].includes(c.kind))
+      .map(c => c.id.split(":").pop() as string);
+    if (!ids.length) { setTrans({}); return; }
+    let alive = true;
+    fetch(`${apiBase()}/api/translate`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "paper", paper_id: pid, lang: "zh", chunk_ids: ids, limit: 300 }),
+    }).then(r => r.json()).then(j => {
+      if (!alive) return;
+      const map: Record<string, string> = {};
+      for (const item of j.items || []) map[item.chunk_id] = item.translation;
+      setTrans(map);
+    }).catch(() => { if (alive) setTrans({}); });
+    return () => { alive = false; };
+  }, [lang, pid, meta, page, chunks]);
 
   if (!pid) return (
     <div className="card">
@@ -181,7 +203,7 @@ function Inner() {
         <div className="row grow" style={{ marginTop: 12 }}>
           <button className={`btn ghost ${lang === "zh" ? "chip" : ""}`}
             onClick={() => setLang(lang === "zh" ? "en" : "zh")}>
-            {lang === "zh" ? "🔄 切换：显示中文译文" : "🔄 切换：隐藏译文（原文）"}
+            {lang === "zh" ? "🔄 隐藏中文译文（仅原文）" : "🔄 显示中文译文（双语对照）"}
           </button>
           <input type="text" placeholder="页内搜索…"
             value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -282,7 +304,7 @@ function Inner() {
         {evidence && hit && (
           <div className="row" style={{ marginTop: 12, alignItems: "center" }}>
             <span className="chip" style={{ background: "#fef3c7", borderColor: "#f59e0b" }}>
-              🎯 已定位到引用证据 · 第 {page + 1} 页
+              {hitExact ? "🎯 已定位到引用证据" : "🎯 已定位到引用所在页（该页段落已重排，无法精确到行）"} · 第 {page + 1} 页
             </span>
             <button className="btn ghost" style={{ marginLeft: 10 }}
               onClick={() => { setEvidence(false); setHit(null); }}>清除高亮</button>
@@ -364,10 +386,11 @@ function Inner() {
           {pickResult && (
             <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.7 }}>
               {pickResult.text}
-              <div style={{ marginTop: 6, fontSize: 11, color: "var(--ink-3)" }}>
-                mode={pickResult.mode}
-                {pickResult.mode === "offline" && "（离线模式：未配置模型，不伪造译文）"}
-              </div>
+              {pickResult.mode !== "llm" && (
+                <div style={{ marginTop: 6, fontSize: 11, color: "var(--ink-3)" }}>
+                  当前按原文展示，切换在线模型可获得译文
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -201,9 +201,10 @@ def list_papers() -> list[dict]:
         rows = conn.execute(
             "SELECT id,title,authors,year,venue,arxiv_id,filename,num_pages,"
             "created_at,status,meta FROM papers ORDER BY created_at DESC").fetchall()
-        # 一次查询所有已翻译的论文 id（避免 N+1）
+        # 一次查询所有已翻译的论文 id（避免 N+1）；只认真正的中文译文
         tx = conn.execute(
-            "SELECT DISTINCT paper_id FROM translations LIMIT 500")
+            "SELECT DISTINCT paper_id FROM translations"
+            " WHERE lang='zh' AND text GLOB '*[一-龥]*' LIMIT 500")
         translated = {r["paper_id"] for r in tx.fetchall()}
     out = []
     for row in rows:

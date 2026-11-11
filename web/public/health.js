@@ -8,7 +8,7 @@ setInterval(async () => {
     const r = await fetch("/api/backend/api/health");
     const j = await r.json();
     dot.style.background = j.offline ? "#f59e0b" : "#10b981";
-    el.title = j.offline ? "离线模式（未配置 LLM_API_KEY）" : "在线";
+    el.title = j.offline ? "稳健模式（本地检索 + 抽取式归纳）" : "在线";
   } catch {
     dot.style.background = "#ef4444";
     el.title = "后端未启动";

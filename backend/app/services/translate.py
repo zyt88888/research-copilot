@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 
 from ..db import get_conn
-from . import llm
+from . import llm, nmt
 from .store import chunks_of
 
 # 需要原样保留的片段：$...$、\(...\)、代码、方括号引用、URL、数学符号串
@@ -68,15 +68,22 @@ def translate_chunks(paper_id: str, lang: str = "zh",
         except Exception as exc:
             mode = f"error:{exc}"
     elif todo:
-        mode = "offline"
-        # 无 LLM 兜底：把原文自身作为译文落库（评委接入 LLM_API_KEY 后再次调用 translate_chunks 会自动覆盖）
-        with get_conn() as conn:
-            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            for c in todo:
-                conn.execute(
-                    "INSERT OR REPLACE INTO translations (paper_id,chunk_id,lang,text,created_at)"
-                    " VALUES (?,?,?,?,?)",
-                    (paper_id, f"{paper_id}:{c['id']}", lang, c["text"], now))
+        # 无在线模型：走本地离线 NMT（镜像内预置，无需任何 Key）
+        translated = nmt.translate([c["text"] for c in todo]) if lang == "zh" else None
+        if translated and len(translated) == len(todo):
+            mode = "nmt"
+            with get_conn() as conn:
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                for c, text in zip(todo, translated):
+                    if not text:
+                        continue
+                    conn.execute(
+                        "INSERT OR REPLACE INTO translations (paper_id,chunk_id,lang,text,created_at)"
+                        " VALUES (?,?,?,?,?)",
+                        (paper_id, f"{paper_id}:{c['id']}", lang, text, now))
+        else:
+            # 模型尚未就绪：只返回原文，不落库（避免把原文伪造成译文）
+            mode = "offline"
 
     with get_conn() as conn:
         rows = conn.execute(
@@ -91,7 +98,7 @@ def translate_chunks(paper_id: str, lang: str = "zh",
         items.append({
             "chunk_id": cid, "page": c["page"], "bbox": c["bbox"],
             "section": c["section"], "source": c["text"],
-            "translation": trans or (c["text"] if lang == "zh" and mode == "offline" else ""),
+            "translation": trans or "",
             "translated": bool(trans),
         })
     return {"items": items, "mode": mode, "cached": len(chunks) - len(todo)}
@@ -132,8 +139,11 @@ def translate_text(text: str, target: str = "zh") -> dict:
         return {"text": "", "mode": "empty"}
     protected, keep = _protect(text)
     if not llm.is_available():
+        local = nmt.translate([text])
+        if local and local[0]:
+            return {"text": local[0], "mode": "nmt"}
         return {"text": text, "mode": "offline",
-                "notice": "未配置 LLM_API_KEY，划词翻译需在线模型"}
+                "notice": "翻译模型加载中，请稍后重试"}
     try:
         lang = "中文" if target == "zh" else "英文"
         out = llm.chat([{"role": "system", "content": SYSTEM},

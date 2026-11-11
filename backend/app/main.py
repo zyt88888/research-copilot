@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -17,7 +18,7 @@ from .api.papers import router as papers_router
 from .api.thumbnails import router as thumbnails_router
 from .db import init_db
 from .settings import CORS_ORIGINS
-from .services import llm, embeddings
+from .services import llm, embeddings, nmt
 
 app = FastAPI(title="科研小助手 Agent", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS,
@@ -27,6 +28,8 @@ app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS,
 @app.on_event("startup")
 def _start():
     init_db()
+    # 后台预热离线翻译模型（模型已烘进镜像时秒级完成；不阻塞服务启动）
+    threading.Thread(target=nmt.warmup, daemon=True).start()
 
 
 @app.get("/api/health")
