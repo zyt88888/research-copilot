@@ -97,13 +97,34 @@ def _low_confidence(evidence: list[dict]) -> bool:
     return top["dense_score"] < 0.12 and top["score"] < 0.05
 
 
+# 中文提问检索英文论文：中文关键词在英文原句里无法命中，
+# 这里把常见提问意图映射为英文线索词，保证选出的结论句真正对应问题
+_INTENT_HINTS = {
+    "思想": ("we propose", "we introduce", "we present", "key idea", "our approach"),
+    "原理": ("algorithm", "method", "approach", "compute", "kernel", "mechanism"),
+    "方法": ("method", "approach", "algorithm", "technique", "implementation"),
+    "优点": ("faster", "more efficient", "outperform", "reduc", "improv", "memory"),
+    "好处": ("faster", "more efficient", "outperform", "reduc", "improv"),
+    "贡献": ("contribution", "we propose", "we show", "achiev", "novel"),
+    "创新": ("novel", "we propose", "new", "first"),
+    "区别": ("unlike", "whereas", "compared", "difference"),
+    "效果": ("result", "outperform", "improv", "achiev", "accuracy"),
+    "为什么": ("because", "due to", "therefore", "thus"),
+    "总结": ("in summary", "we present", "this paper", "we propose"),
+}
+
+
 def _best_summary_sentence(query: str, evidence: list[dict]) -> str:
     """从所有证据里找最能回答问题的一个句子 → 做综合结论。"""
     keywords = set(re.findall(r"[A-Za-z]{3,}", query.lower())[:12])
     cn_keywords = set(re.findall(r"[\u4e00-\u9fa5]{2,}", query)[:12])
+    hints: list[str] = []
+    for intent, words in _INTENT_HINTS.items():
+        if intent in query:
+            hints.extend(words)
     best = ""
     best_score = -1
-    for ev in evidence[:5]:
+    for rank, ev in enumerate(evidence[:5]):
         for s in split_sentences(ev["text"]):
             low = norm_ws(s.lower())
             # 候选必须是完整句（以 .!? 或中文标点结尾），且不是章节标题行
@@ -118,6 +139,12 @@ def _best_summary_sentence(query: str, evidence: list[dict]) -> str:
             for w in cn_keywords:
                 if w in s:
                     score += 3
+            # 中文提问 + 英文语料的桥梁：意图线索词命中
+            for w in hints:
+                if w in low:
+                    score += 2
+            # 靠前的证据（摘要/引言）多是总述句，给位序加权
+            score += max(0, 2 - rank)
             # 含名词短语/数字的句子加分（论文结论常带贡献点数量/对比对象）
             if re.search(r"\d+", s):
                 score += 1
@@ -133,8 +160,16 @@ def _offline_answer(query: str, evidence: list[dict]) -> str:
     if not evidence:
         return "文献库中没有检索到相关内容，请先上传论文或换一个问法。"
 
-    # 1) 综合结论：从 top 证据里挑最能回答问题的一个完整句
-    lead = _best_summary_sentence(query, evidence)
+    # 1) 综合结论：优先从 top 证据所属论文的摘要里选总述句
+    #    （摘要即作者自述的核心贡献，比正文片段更贴题）
+    lead = ""
+    top_pid = evidence[0].get("paper_id")
+    if top_pid:
+        abstract = (paper_meta(top_pid) or {}).get("abstract") or ""
+        if abstract.strip():
+            lead = _best_summary_sentence(query, [{"text": abstract}])
+    if not lead:
+        lead = _best_summary_sentence(query, evidence)
     if not lead:
         lead = snippet(evidence[0]["text"], 260)
 

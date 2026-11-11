@@ -145,7 +145,8 @@ def _run_tool(name: str, args: dict) -> dict:
         res = rag.answer(args.get("query", ""), args.get("paper_ids") or None)
         return {"tool": name, "answer": res.get("answer", ""),
                 "mode": res.get("mode"), "confidence": res.get("confidence"),
-                "sources": [{"sid": s["sid"], "page": s.get("page"),
+                "sources": [{"sid": s["sid"], "paper_title": s.get("paper_title"),
+                             "page": s.get("page"),
                              "section": s.get("section")} for s in res.get("sources", [])]}
     if name == "translate_paper":
         res = translate.translate_chunks(args.get("paper_id", ""),
@@ -443,19 +444,6 @@ def run(task: str, paper_ids: list[str] | None = None,
            "trace": trace, "offline": offline}
 
 
-def _compact(result: dict) -> dict:
-    """裁剪工具输出，控制上下文长度（长文档场景必需）。"""
-    data = json.loads(json.dumps(result, ensure_ascii=False, default=str))
-    if "items" in data and isinstance(data["items"], list):
-        data["items"] = data["items"][:4]
-    if "sources" in data and isinstance(data["sources"], list):
-        data["sources"] = [{k: v for k, v in s.items() if k != "text"}
-                           for s in data["sources"][:4]]
-    if "markdown" in data:
-        data["markdown"] = data["markdown"][:1500]
-    return data
-
-
 def _offline_summary(task: str, observations: list[dict]) -> str:
     """先给综合结论，再列支撑证据。"""
     # 综合结论：优先从 answer_question 里取；否则从 search_library 的 top 证据里抽
@@ -484,38 +472,47 @@ def _offline_summary(task: str, observations: list[dict]) -> str:
         lines.append(conclusion)
     lines.append("")
 
-    # 再列支撑证据（每个工具产出 → 一段说明）
+    # 再列支撑证据（每个工具产出 → 一段说明），编号全局连续
     lines.append("**支撑证据**")
-    for idx, obs in enumerate(observations, start=1):
+    n = 0
+    for obs in observations:
         tool = obs.get("tool")
         if tool == "search_library":
-            items = obs.get("items", [])[:3]
-            for it in items:
-                lines.append(f"{idx}. {snippet(it.get('text', ''), 200)} （第 {it.get('page')} 页）")
+            for it in obs.get("items", [])[:3]:
+                n += 1
+                lines.append(f"{n}. {snippet(it.get('text', ''), 200)}（第 {it.get('page')} 页）")
         elif tool == "citation_graph":
             stats = obs.get("stats", {})
             top = obs.get("top", [])
             top_titles = "、".join(t.get("title", "")[:20] for t in top[:2])
-            lines.append(f"{idx}. 引用图谱：{stats.get('papers')} 个节点 / {stats.get('edges')} 条边；核心节点：{top_titles or '-'}")
+            n += 1
+            lines.append(f"{n}. 引用图谱：{stats.get('papers')} 个节点 / {stats.get('edges')} 条边；核心节点：{top_titles or '-'}")
         elif tool == "future_work":
             for it in obs.get("items", [])[:3]:
-                lines.append(f"{idx}. [{it.get('status')}] {it.get('title', '')[:120]}")
+                n += 1
+                lines.append(f"{n}. [{it.get('status')}] {it.get('title', '')[:120]}")
         elif tool == "answer_question":
             ans = str(obs.get("answer", ""))
             # 已在 conclusion 里给过结论，这里只列页码引用
             refs = obs.get("sources") or []
             if refs:
                 for r in refs[:3]:
-                    lines.append(f"{idx}. 《{r.get('paper_title', '')[:30]}》第 {r.get('page')} 页 [{r.get('sid')}]")
+                    n += 1
+                    title = (r.get("paper_title") or "").strip()[:30] or r.get("paper_id") or "论文"
+                    lines.append(f"{n}. 《{title}》第 {r.get('page')} 页 [{r.get('sid')}]")
             elif ans:
-                lines.append(f"{idx}. {snippet(ans, 180)}")
+                n += 1
+                lines.append(f"{n}. {snippet(ans, 180)}")
         elif tool == "compare_papers":
-            lines.append(f"{idx}. {snippet(str(obs.get('answer', '')), 260)}")
+            n += 1
+            lines.append(f"{n}. {snippet(str(obs.get('answer', '')), 260)}")
         elif tool == "draft_outline":
-            lines.append(f"{idx}. 已生成论文框架（见右侧结构）。")
+            n += 1
+            lines.append(f"{n}. 已生成论文框架（见右侧结构）。")
         else:
             text = json.dumps(_compact(obs), ensure_ascii=False)
-            lines.append(f"{idx}. {snippet(text, 180)}")
+            n += 1
+            lines.append(f"{n}. {snippet(text, 180)}")
 
     # 提示行 —— 弱提示，不劝退
     lines.append("")
