@@ -85,19 +85,27 @@ def version_diff(old_paper_id: str, parsed: dict, max_items: int = 6) -> dict:
             "SELECT section, page, kind, text || '' AS text FROM chunks "
             "WHERE paper_id=? AND kind IN ('paragraph','heading') ORDER BY seq",
             (old_paper_id,)).fetchall()]
-        old_title = conn.execute("SELECT title FROM papers WHERE id=?",
-                                 (old_paper_id,)).fetchone()
-    old_sections = [c["section"].split(" > ")[-1] for c in old_chunks
-                    if c["kind"] == "heading"]
-    new_sections = [c["text"] for c in parsed.get("chunks", []) if c["kind"] == "heading"]
+        old_meta_row = conn.execute("SELECT title, meta FROM papers WHERE id=?",
+                                    (old_paper_id,)).fetchone()
+
+    # 优先从 meta.toc 取章节标题（入库时 pdf_parser 已抽取），
+    # fallback 到 chunks 的 heading kind（部分论文因解析器识别策略可能为空）
+    old_toc = _toc_from_meta(old_meta_row["meta"] if old_meta_row else None)
+    old_sections = old_toc or [
+        c["section"].split(" > ")[-1] for c in old_chunks if c["kind"] == "heading"]
+
+    new_toc = _toc_from_meta(parsed.get("meta"))
+    new_sections = new_toc or [
+        c.get("text", "") for c in parsed.get("chunks", []) if c.get("kind") == "heading"]
+
     old_text = " ".join(c["text"] for c in old_chunks if c["kind"] == "paragraph")
     new_text = " ".join(c["text"] for c in parsed.get("chunks", [])
-                        if c["kind"] == "paragraph")
+                        if c.get("kind") == "paragraph")
     ratio = SequenceMatcher(None, old_text[:80000], new_text[:80000]).ratio()
-    added = [s for s in new_sections if s not in old_sections][:max_items]
-    removed = [s for s in old_sections if s not in new_sections][:max_items]
+    added = [s for s in new_sections if s and s not in old_sections][:max_items]
+    removed = [s for s in old_sections if s and s not in new_sections][:max_items]
     return {
-        "old_title": old_title["title"] if old_title else "",
+        "old_title": old_meta_row["title"] if old_meta_row else "",
         "new_title": parsed.get("title"),
         "text_similarity": round(ratio, 3),
         "old_sections": len(old_sections),
@@ -108,6 +116,30 @@ def version_diff(old_paper_id: str, parsed: dict, max_items: int = 6) -> dict:
         "new_pages": parsed.get("num_pages"),
         "summary": _diff_sentence(ratio, added, removed, parsed),
     }
+
+
+def _toc_from_meta(meta_str: str | None) -> list[str]:
+    """从 papers.meta JSON 里的 toc 字段提取章节标题列表。"""
+    if not meta_str:
+        return []
+    try:
+        import json
+        meta = json.loads(meta_str)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    toc = meta.get("toc") or []
+    out = []
+    for item in toc:
+        if isinstance(item, dict):
+            title = item.get("title") or item.get("section") or ""
+        elif isinstance(item, str):
+            title = item
+        else:
+            continue
+        title = title.strip()
+        if title and len(title) > 2:
+            out.append(title)
+    return out
 
 
 def _diff_sentence(ratio: float, added: list, removed: list, parsed: dict) -> str:

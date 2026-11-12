@@ -196,11 +196,13 @@ def version_diff(payload: dict):
     # 我们从两篇已入库论文构造两个 parsed 形式
     def _parsed_from_chunks(pid: str, meta: dict) -> dict:
         chunks = chunks_of(pid)
+        import json as _json
         return {
             "title": meta["title"],
             "num_pages": meta.get("num_pages"),
             "arxiv_id": meta.get("arxiv_id"),
             "chunks": chunks,
+            "meta": meta.get("meta") and _json.dumps(meta["meta"], ensure_ascii=False),
         }
 
     new_parsed = _parsed_from_chunks(new_id, new_meta)

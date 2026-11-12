@@ -90,11 +90,84 @@ def _evidence(query: str, paper_ids: list[str] | None, top_k: int,
     return evid
 
 
-def _low_confidence(evidence: list[dict]) -> bool:
+# 停用词：英文常用虚词 + 中文标点助词，在 token 重合判断时跳过
+_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "shall", "should",
+    "can", "could", "may", "might", "must", "to", "of", "in", "for", "on",
+    "with", "at", "by", "from", "as", "into", "through", "during", "before",
+    "after", "above", "below", "between", "out", "off", "over", "under",
+    "again", "further", "then", "once", "here", "there", "when", "where",
+    "why", "how", "all", "any", "both", "each", "few", "more", "most",
+    "other", "some", "such", "no", "nor", "not", "only", "own", "same",
+    "so", "than", "too", "very", "just", "and", "but", "or", "if", "while",
+    "this", "that", "these", "those", "it", "its", "he", "she", "they",
+    "we", "you", "i", "me", "him", "her", "us", "them", "my", "your",
+    "his", "our", "their", "what", "which", "who", "whom", "whose",
+    "also", "can", "use", "used", "using", "used", "based", "paper",
+    "model", "method", "method", "approach", "system", "result", "results",
+    "show", "shows", "shown", "showing", "propose", "proposed", "we",
+}
+
+
+def _low_confidence(evidence: list[dict], query: str = "") -> bool:
+    """判断证据是否足够支撑回答。
+
+    不依赖 score/dense_score 绝对阈值（hash embedding 模式下分布无区分度），
+    而是检查：
+    1. 证据是否为空
+    2. 查询 token 与 evidence 正文的字面重合度（核心）
+    3. 是否全是公式/表格/附录等非段落内容
+    """
     if not evidence:
         return True
-    top = evidence[0]
-    return top["dense_score"] < 0.12 and top["score"] < 0.05
+
+    # 查询 token：英文 ≥ 3 字符、去掉停用词
+    query_words = set(re.findall(r'[A-Za-z]{3,}', (query or "").lower()))
+    query_words = {w for w in query_words if w not in _STOPWORDS}
+    # 中文：连续 2+ 汉字
+    cn_phrases = set(re.findall(r'[\u4e00-\u9fa5]{2,}', query or ""))
+
+    # 查询本身是空 → 保守不拒答
+    if not query_words and not cn_phrases:
+        return False
+
+    # 全是公式/表格/附录 → 拒答
+    NON_CONTENT = ("figure", "fig.", "table", "appendix", "equation", "eq.", "formula")
+    meaningful = 0
+    for ev in evidence[:5]:
+        sec = (ev.get("section") or "").lower()
+        text = (ev.get("text") or "").lower()
+        is_non_content = any(kw in sec or kw in text[:40] for kw in NON_CONTENT)
+        if not is_non_content and len(text) > 80:
+            meaningful += 1
+    if meaningful == 0:
+        return True
+
+    # 字面重合检查：至少 2 条 evidence 要有非停用词 token 命中
+    hit_count = 0
+    for ev in evidence[:5]:
+        ev_text = ev["text"].lower()
+        hit = False
+        # 英文 token 完整单词匹配
+        for token in query_words:
+            if re.search(r'\b' + re.escape(token) + r'\b', ev_text):
+                hit = True
+                break
+        # 中文短语子串匹配
+        if not hit:
+            for phrase in cn_phrases:
+                if phrase in ev["text"]:
+                    hit = True
+                    break
+        if hit:
+            hit_count += 1
+
+    need_hits = 2 if (query_words or cn_phrases) else 0
+    if hit_count < need_hits:
+        return True
+
+    return False
 
 
 # 中文提问检索英文论文：中文关键词在英文原句里无法命中，
@@ -224,7 +297,7 @@ def answer(query: str, paper_ids: list[str] | None = None,
            top_k: int = 8, history: list[dict] | None = None,
            hierarchical: bool = False) -> dict:
     evidence = _evidence(query, paper_ids, top_k, hierarchical=hierarchical)
-    if _low_confidence(evidence):
+    if _low_confidence(evidence, query):
         return {
             "answer": "现有文献库中没有找到与该问题足够相关的原文依据，暂不能给出可靠回答。"
                       "建议先上传相关论文，或把问题具体到某篇文献的章节。",
