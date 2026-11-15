@@ -100,10 +100,33 @@ def diagram(payload: dict):
 
 @router.post("/api/copilot/csv")
 def csv_chart(payload: dict):
-    path = payload.get("path")
-    if not path or not Path(path).exists():
-        raise HTTPException(status_code=400, detail="CSV 文件不存在")
-    return copilot.csv_to_chart(Path(path).read_bytes(), Path(path).name)
+    # 支持两种方式：1) 浏览器直接上传文件内容（content: base64 或纯文本）；2) 后端可读路径（仅调试用）
+    if payload.get("content") is not None:
+        content = payload["content"]
+        # 兼容 base64 编码和纯文本
+        if isinstance(content, str):
+            if content.startswith("data:"):  # data URL
+                content = content.split(",", 1)[1]
+            import base64
+            try:
+                data = base64.b64decode(content)
+                # 如果解码后不像文本（有大量非ASCII控制字符），可能是纯文本误判
+                try:
+                    data.decode("utf-8")
+                except UnicodeDecodeError:
+                    pass
+            except Exception:
+                data = content.encode("utf-8")
+        else:
+            data = content if isinstance(content, bytes) else str(content).encode("utf-8")
+        filename = payload.get("filename", "uploaded.csv")
+    else:
+        path = payload.get("path")
+        if not path or not Path(path).exists():
+            raise HTTPException(status_code=400, detail="请上传 CSV 文件或提供后端可读路径")
+        data = Path(path).read_bytes()
+        filename = Path(path).name
+    return copilot.csv_to_chart(data, filename)
 
 
 @router.post("/api/agent/plan")
