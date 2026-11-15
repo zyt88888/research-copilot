@@ -261,7 +261,39 @@ export default function ChatPage() {
     return () => clearInterval(t);
   }, [loading]);
 
+  // 答案区：收起 + 翻译状态
+  const [answerCollapsed, setAnswerCollapsed] = useState(false);
+  const [answerTranslated, setAnswerTranslated] = useState(false);
+  const [answerTrans, setAnswerTrans] = useState<string[]>([]);
+  const [answerTransLoading, setAnswerTransLoading] = useState(false);
+
   const selPapers = useMemo(() => papers.filter(p => selected.includes(p.id)), [papers, selected]);
+
+  // 切换翻译：按段落翻译答案，显示中英对照
+  async function toggleAnswerTranslate() {
+    if (answerTranslated) { setAnswerTranslated(false); return; }
+    if (answerTrans.length > 0) { setAnswerTranslated(true); return; }
+    const paragraphs = (answer?.answer || "").split(/\n{2,}/).filter(p => p.trim());
+    if (!paragraphs.length) { setAnswerTranslated(true); return; }
+    setAnswerTransLoading(true);
+    try {
+      const results = await Promise.all(paragraphs.map(async (p) => {
+        try {
+          const r = await fetch(`${apiBase()}/api/translate`, {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ mode: "text", text: p, target: "zh" }),
+          });
+          if (!r.ok) return p;
+          const j = await r.json();
+          return j.text || p;
+        } catch { return p; }
+      }));
+      setAnswerTrans(results);
+      setAnswerTranslated(true);
+    } finally {
+      setAnswerTransLoading(false);
+    }
+  }
 
   async function submit() {
     if (mode === "chat" && selected.length === 0) { alert("请先点选至少一篇论文"); return; }
@@ -272,6 +304,7 @@ export default function ChatPage() {
     }
     if (mode === "compare" && selected.length < 2) { alert("至少选 2 篇论文对比"); return; }
     setLoading(true); setAnswer(null); setAnswerErr(null);
+    setAnswerCollapsed(false); setAnswerTranslated(false); setAnswerTrans([]);
     try {
       const url = mode === "chat" ? `${apiBase()}/api/chat` : `${apiBase()}/api/compare`;
       const body = mode === "chat"
@@ -401,43 +434,70 @@ export default function ChatPage() {
 
       {answer && !loading && (
         <section className="card">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <strong>答案</strong>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div className="row" style={{ alignItems: "center", gap: 8 }}>
+              <strong style={{ cursor: "pointer" }} onClick={() => setAnswerCollapsed(v => !v)}>
+                {answerCollapsed ? "▶" : "▼"} 答案
+              </strong>
+              {!answerCollapsed && (
+                <button className="btn ghost" style={{ padding: "2px 10px", fontSize: 12 }}
+                  onClick={toggleAnswerTranslate} disabled={answerTransLoading}>
+                  {answerTransLoading ? "⏳ 翻译中…" : answerTranslated ? "🔄 仅原文" : "🌐 中英对照"}
+                </button>
+              )}
+            </div>
             <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
               模式：{answer.mode_label || answer.mode} · 置信度 {Number(answer.confidence || 0).toFixed(2)} · {Number(answer.elapsed || 0).toFixed(2)}s
             </span>
           </div>
-          <div style={{ marginTop: 10, lineHeight: 1.75, whiteSpace: "pre-wrap" }}>
-            {answer.answer}
-          </div>
-          {(answer.sources?.length || 0) > 0 && (
-            <div className="sources">
-              <strong>📎 证据溯源（点击右侧对照定位）</strong>
-              {answer.sources.map((s: any) => (
-                <a key={s.sid} className="source"
-                  href={`/reader?id=${s.paper_id}&page=${s.page}${s.bbox?.length ?
-                    `#bbox=${s.bbox.join(",")}` : ""}`}
-                  onClick={(e) => {
-                    // 面板打开时，点击证据在对应论文的面板内定位高亮
-                    e.preventDefault();
-                    setFocus({ paperId: s.paper_id, bbox: s.bbox?.length === 4 ? s.bbox : null,
-                      page: s.page, nonce: Date.now() });
-                    if (!panelOpen) setPanelOpen(true);
-                  }}>
-                  <span className="sid">[{s.sid}]</span>
-                  <strong>{s.paper_title}</strong> · 第 {s.page} 页 · {s.section || "-"}
-                  <div style={{ marginTop: 4, fontSize: 12, color: "var(--ink-3)" }}>
-                    {s.text.slice(0, 220)}
-                  </div>
-                </a>
-              ))}
-            </div>
-          )}
-          {(answer.dropped_citations?.length || 0) > 0 && (
-            <div style={{ marginTop: 8, fontSize: 12, color: "var(--warn)" }}>
-              ⚠ 以下引用编号已被模型生成但证据中不存在，已自动剔除：
-              {answer.dropped_citations.join(", ")}
-            </div>
+          {!answerCollapsed && (
+            <>
+              <div style={{ marginTop: 10, lineHeight: 1.75 }}>
+                {answerTranslated ? (
+                  (answer.answer || "").split(/\n{2,}/).filter((p: string) => p.trim()).map((p: string, i: number) => (
+                    <div key={i} style={{ marginBottom: 12 }}>
+                      <div style={{ whiteSpace: "pre-wrap" }}>{p}</div>
+                      {answerTrans[i] && answerTrans[i] !== p && (
+                        <div style={{ marginTop: 4, color: "var(--ink-3)", fontSize: 13, paddingLeft: 8,
+                          borderLeft: "3px solid var(--brand)" }}>
+                          🇨🇳 {answerTrans[i]}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ whiteSpace: "pre-wrap" }}>{answer.answer}</div>
+                )}
+              </div>
+              {(answer.sources?.length || 0) > 0 && (
+                <div className="sources">
+                  <strong>📎 证据溯源（点击右侧对照定位）</strong>
+                  {answer.sources.map((s: any) => (
+                    <a key={s.sid} className="source"
+                      href={`/reader?id=${s.paper_id}&page=${s.page}${s.bbox?.length ?
+                        `#bbox=${s.bbox.join(",")}` : ""}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setFocus({ paperId: s.paper_id, bbox: s.bbox?.length === 4 ? s.bbox : null,
+                          page: s.page, nonce: Date.now() });
+                        if (!panelOpen) setPanelOpen(true);
+                      }}>
+                      <span className="sid">[{s.sid}]</span>
+                      <strong>{s.paper_title}</strong> · 第 {s.page} 页 · {s.section || "-"}
+                      <div style={{ marginTop: 4, fontSize: 12, color: "var(--ink-3)" }}>
+                        {s.text.slice(0, 220)}
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
+              {(answer.dropped_citations?.length || 0) > 0 && (
+                <div style={{ marginTop: 8, fontSize: 12, color: "var(--warn)" }}>
+                  ⚠ 以下引用编号已被模型生成但证据中不存在，已自动剔除：
+                  {answer.dropped_citations.join(", ")}
+                </div>
+              )}
+            </>
           )}
         </section>
       )}
