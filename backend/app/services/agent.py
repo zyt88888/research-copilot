@@ -124,7 +124,25 @@ def _run_tool(name: str, args: dict) -> dict:
                                         "toc": toc,
                                         "refs": len(refs_of(pid))}}
     if name == "compare_papers":
-        ids = args.get("paper_ids") or [p["id"] for p in list_papers()[:3]]
+        ids = args.get("paper_ids") or []
+        if not ids:
+            # 没有指定论文时，先提取英文技术词检索相关论文（中文停用词会干扰 BM25）
+            aspect = args.get("aspect") or args.get("query") or ""
+            query = aspect
+            eng_words = re.findall(r"[A-Za-z][A-Za-z0-9\-]{2,}", aspect)
+            if eng_words:
+                query = " ".join(eng_words)  # 用英文技术词检索更准
+            if query:
+                hits = hybrid_search(query, None, top_k=10)
+                seen = []
+                for h in hits:
+                    if h["paper_id"] not in seen:
+                        seen.append(h["paper_id"])
+                    if len(seen) >= 3:
+                        break
+                ids = seen
+            if not ids:
+                ids = [p["id"] for p in list_papers()[:3]]
         papers = [paper_meta(i) for i in ids]
         papers = [p for p in papers if p]
         if len(papers) < 2:
@@ -147,7 +165,8 @@ def _run_tool(name: str, args: dict) -> dict:
                 "mode": res.get("mode"), "confidence": res.get("confidence"),
                 "sources": [{"sid": s["sid"], "paper_title": s.get("paper_title"),
                              "page": s.get("page"),
-                             "section": s.get("section")} for s in res.get("sources", [])]}
+                             "section": s.get("section"),
+                             "text": s.get("text", "")} for s in res.get("sources", [])]}
     if name == "translate_paper":
         res = translate.translate_chunks(args.get("paper_id", ""),
                                          args.get("lang", "zh"), limit=4)
@@ -281,10 +300,11 @@ def _offline_plan(task: str) -> list[dict]:
     if re.search(r"对比|比较|compare|vs", t):
         plan.append({"title": "检索各论文相关证据", "tool": "search_library",
                      "args": {"query": task}})
-        plan.append({"title": "生成多维对比表", "tool": "compare_papers", "args": {}})
+        plan.append({"title": "生成多维对比表", "tool": "compare_papers",
+                     "args": {"aspect": task}})
     if re.search(r"图谱|引用|citation|核心|基石", t):
         plan.append({"title": "构建引用图谱并计算 PageRank", "tool": "citation_graph", "args": {}})
-    if re.search(r"创新点|贡献|contribution|总结|summary|方法|原理|优点", t):
+    if re.search(r"创新|贡献|contribution|总结|summary|方法|原理|优点|核心|是什么", t):
         plan.append({"title": "基于证据回答问题", "tool": "answer_question",
                      "args": {"query": task}})
     if re.search(r"未来|前沿|idea|创新点|future", t):
@@ -365,8 +385,10 @@ def run(task: str, paper_ids: list[str] | None = None,
         if tool == "final":
             break
         args = step.get("args") or {}
-        if tool == "compare_papers" and not args.get("paper_ids"):
-            args["paper_ids"] = paper_ids or [p["id"] for p in list_papers()[:3]]
+        if tool == "compare_papers":
+            # 用户指定了论文范围才传 paper_ids；否则由 _run_tool 内部检索相关论文
+            if paper_ids:
+                args["paper_ids"] = paper_ids
         if tool == "answer_question":
             # 用户指定了论文范围时，回答必须限定在这几篇，避免检索到无关片段
             args.setdefault("query", task)
@@ -444,79 +466,138 @@ def run(task: str, paper_ids: list[str] | None = None,
            "trace": trace, "offline": offline}
 
 
+def _extract_keywords(text: str) -> set[str]:
+    """从任务/问题中提取关键词（中文 2+ 字、英文 3+ 字，去停用词）。"""
+    stop = {"the", "and", "for", "with", "that", "this", "from", "have", "which",
+            "什么", "怎么", "如何", "为什么", "哪些", "对比", "比较", "区别", "分析",
+            "总结", "归纳", "请问", "帮我", "一下", "它们", "我们", "你们"}
+    words: set[str] = set()
+    for w in re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z]{3,}", text.lower()):
+        if w not in stop:
+            words.add(w)
+    return words
+
+
+def _relevance(text: str, keywords: set[str]) -> int:
+    """文本与关键词的重合数，用于过滤无关证据。"""
+    if not keywords:
+        return 1
+    low = text.lower()
+    return sum(1 for k in keywords if k in low)
+
+
+def _extract_conclusion(answer: str) -> str:
+    """从 RAG answer 中提取「综合结论」段落到下一个 ** 标题为止。"""
+    if not answer:
+        return ""
+    # 找 **综合结论** 段落
+    m = re.search(r"\*\*综合结论\*\*\s*\n?(.*?)(?=\n\*\*|\Z)", answer, re.DOTALL)
+    if m:
+        text = m.group(1).strip()
+        if text and not _looks_like_section_header(text):
+            return text
+    # 没有综合结论段或内容是标题，取第一段有意义的非空内容
+    for line in answer.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("**") or line.startswith("#"):
+            continue
+        if _looks_like_section_header(line):
+            continue
+        return snippet(line, 300)
+    return ""
+
+
+def _looks_like_section_header(text: str) -> bool:
+    """判断文本是否像章节编号/标题（如 '12.7.2 Masked self-attention'）。"""
+    t = text.strip()
+    # 以数字编号开头（如 12.7.2、3.1、Figure 1）
+    if re.match(r"^(\d+\.)+\d*\s*[A-Z]", t):
+        return True
+    if re.match(r"^(Figure|Table|Section|Algorithm)\s*\d+", t, re.I):
+        return True
+    # 全大写且很短（像标题）
+    if len(t) < 40 and t.upper() == t and t.replace(" ", "").isalpha():
+        return True
+    return False
+
+
 def _offline_summary(task: str, observations: list[dict]) -> str:
-    """先给综合结论，再列支撑证据。"""
-    # 综合结论：优先从 answer_question 里取；否则从 search_library 的 top 证据里抽
-    conclusion = ""
-    for obs in reversed(observations):  # 后执行的 answer_question 优先
-        tool = obs.get("tool")
-        if tool == "answer_question" and obs.get("answer"):
-            # 已含「综合结论」段落，直接沿用
-            ans = str(obs["answer"]).strip()
-            # 截取前 2–3 行作为摘要（通常第一行是「**综合结论**」+ lead）
-            head = "\n".join(ans.split("\n")[:3]).strip()
-            if head and "综合结论" not in head:
-                conclusion = f"**综合结论**\n{head}"
-            else:
-                conclusion = head or ans[:400]
-            break
-        if tool == "search_library":
-            items = obs.get("items") or []
-            if items:
-                lead = snippet(items[0].get("text", ""), 260)
-                conclusion = f"**综合结论**\n{lead}"
-                break
+    """有逻辑的离线总结：综合结论 → 分维度证据 → 过滤无关内容。"""
+    keywords = _extract_keywords(task)
+    is_compare = any(w in task for w in ("对比", "比较", "区别", "差异", "compare", "vs", "VS"))
 
-    lines = [f"### 任务：{task}", ""]
-    if conclusion:
-        lines.append(conclusion)
-    lines.append("")
+    # ---- 1. 收集所有证据，带相关性评分 ----
+    all_evidence: list[dict] = []  # {text, page, paper_title, relevance}
+    answer_text = ""
+    compare_text = ""
 
-    # 再列支撑证据（每个工具产出 → 一段说明），编号全局连续
-    lines.append("**支撑证据**")
-    n = 0
     for obs in observations:
         tool = obs.get("tool")
-        if tool == "search_library":
-            for it in obs.get("items", [])[:3]:
-                n += 1
-                lines.append(f"{n}. {snippet(it.get('text', ''), 200)}（第 {it.get('page')} 页）")
-        elif tool == "citation_graph":
-            stats = obs.get("stats", {})
-            top = obs.get("top", [])
-            top_titles = "、".join(t.get("title", "")[:20] for t in top[:2])
-            n += 1
-            lines.append(f"{n}. 引用图谱：{stats.get('papers')} 个节点 / {stats.get('edges')} 条边；核心节点：{top_titles or '-'}")
-        elif tool == "future_work":
-            for it in obs.get("items", [])[:3]:
-                n += 1
-                lines.append(f"{n}. [{it.get('status')}] {it.get('title', '')[:120]}")
-        elif tool == "answer_question":
-            ans = str(obs.get("answer", ""))
-            # 已在 conclusion 里给过结论，这里只列页码引用
-            refs = obs.get("sources") or []
-            if refs:
-                for r in refs[:3]:
-                    n += 1
-                    title = (r.get("paper_title") or "").strip()[:30] or r.get("paper_id") or "论文"
-                    lines.append(f"{n}. 《{title}》第 {r.get('page')} 页 [{r.get('sid')}]")
-            elif ans:
-                n += 1
-                lines.append(f"{n}. {snippet(ans, 180)}")
+        if tool == "answer_question":
+            answer_text = str(obs.get("answer", ""))
+            for r in (obs.get("sources") or []):
+                all_evidence.append({
+                    "text": r.get("section", "") + " " + r.get("text", ""),
+                    "page": r.get("page"), "paper_title": r.get("paper_title"),
+                    "sid": r.get("sid"), "relevance": _relevance(r.get("text", ""), keywords)})
+        elif tool == "search_library":
+            for it in obs.get("items", []):
+                all_evidence.append({
+                    "text": it.get("text", ""), "page": it.get("page"),
+                    "paper_title": it.get("paper_title") or it.get("paper_id"),
+                    "relevance": _relevance(it.get("text", ""), keywords)})
         elif tool == "compare_papers":
-            n += 1
-            lines.append(f"{n}. {snippet(str(obs.get('answer', '')), 260)}")
-        elif tool == "draft_outline":
-            n += 1
-            lines.append(f"{n}. 已生成论文框架（见右侧结构）。")
-        else:
-            text = json.dumps(_compact(obs), ensure_ascii=False)
-            n += 1
-            lines.append(f"{n}. {snippet(text, 180)}")
+            compare_text = str(obs.get("answer", ""))
+        elif tool == "future_work":
+            for it in obs.get("items", []):
+                all_evidence.append({
+                    "text": it.get("title", ""), "page": it.get("page"),
+                    "paper_title": it.get("paper"), "relevance": 1})
 
-    # 提示行 —— 弱提示，不劝退
-    lines.append("")
-    lines.append("_提示：已内置本地检索 + 抽取式归纳；接入 LLM_API_KEY 可获得更连贯的论述式回答。_")
+    # ---- 2. 生成综合结论 ----
+    conclusion = ""
+    if answer_text:
+        conclusion = _extract_conclusion(answer_text)
+    # 如果结论是 section header 或太短，从相关证据里找真正的段落
+    if (not conclusion or _looks_like_section_header(conclusion) or len(conclusion) < 30) and all_evidence:
+        candidates = [e for e in all_evidence if not _looks_like_section_header(e["text"]) and len(e["text"]) > 50]
+        if candidates:
+            top = max(candidates, key=lambda e: e["relevance"])
+            conclusion = snippet(top["text"], 260)
+
+    # ---- 3. 过滤 + 排序证据：只保留相关的、非标题的，按相关性降序 ----
+    relevant = [e for e in all_evidence
+                if e["relevance"] > 0 and not _looks_like_section_header(e["text"]) and len(e["text"]) > 30]
+    if not relevant:
+        # 放宽：不要求关键词重合，但排除纯标题
+        relevant = [e for e in all_evidence
+                    if not _looks_like_section_header(e["text"]) and len(e["text"]) > 30]
+    relevant.sort(key=lambda e: e["relevance"], reverse=True)
+    relevant = relevant[:6]  # 最多 6 条
+
+    # ---- 4. 组装输出 ----
+    lines = [f"### 任务：{task}", ""]
+
+    if conclusion:
+        lines.append("**综合结论**")
+        lines.append(conclusion)
+        lines.append("")
+
+    if is_compare and compare_text:
+        lines.append("**对比分析**")
+        lines.append(compare_text[:800])
+        lines.append("")
+
+    if relevant:
+        lines.append("**支撑证据**（按相关度排序）")
+        for i, e in enumerate(relevant, 1):
+            title = (e.get("paper_title") or "").strip()[:30] or "论文"
+            page = e.get("page")
+            text = snippet(e["text"], 200)
+            lines.append(f"{i}. 《{title}》第 {page} 页：{text}")
+        lines.append("")
+
+    lines.append("_提示：当前为离线归纳模式；接入 LLM_API_KEY 可获得更连贯的论述式回答。_")
     return "\n".join(lines)
 
 
