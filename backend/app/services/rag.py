@@ -353,12 +353,32 @@ def verify_citations(text: str, evidence: list[dict]) -> tuple[str, set[str], li
 
 
 def _confidence(evidence: list[dict], used: set[str], dropped: list[str]) -> float:
+    """置信度：综合证据数量、引用覆盖、证据质量，惩罚虚构引用。"""
     if not evidence:
         return 0.0
-    base = min(1.0, 0.35 + 0.5 * min(evidence[0]["dense_score"], 1.0))
-    used_ratio = len(used) / max(1, len(evidence))
-    drop_penalty = len(dropped) * 0.15
-    return max(0.0, min(1.0, round(base * (0.5 + 0.5 * used_ratio) - drop_penalty, 3)))
+
+    # 1) 证据存在性（40%）：检索到的证据越多越可靠，5 条以上满分
+    evidence_score = min(1.0, len(evidence) / 5)
+
+    # 2) 引用覆盖率（40%）：答案实际引用了多少真实证据
+    #    分母用 min(检索数, 5)，避免"引用 3/8"被误判为低覆盖
+    denom = min(len(evidence), 5)
+    used_ratio = min(1.0, len(used) / denom) if denom > 0 else 0.0
+
+    # 3) 证据质量（20%）：最佳证据的混合检索分数
+    best_score = max((ev.get("score", 0) for ev in evidence), default=0.0)
+    quality = min(1.0, best_score / 0.3)  # 0.3 以上满分
+
+    # 4) 虚构引用惩罚
+    drop_penalty = min(0.5, len(dropped) * 0.15)
+
+    conf = 0.4 * evidence_score + 0.4 * used_ratio + 0.2 * quality - drop_penalty
+
+    # 答案完全没有引用真实证据时，降一档
+    if len(used) == 0:
+        conf *= 0.6
+
+    return max(0.0, min(1.0, round(conf, 3)))
 
 
 # ---------------------------------------------------------------------------
