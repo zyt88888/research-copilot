@@ -359,3 +359,94 @@ def _confidence(evidence: list[dict], used: set[str], dropped: list[str]) -> flo
     used_ratio = len(used) / max(1, len(evidence))
     drop_penalty = len(dropped) * 0.15
     return max(0.0, min(1.0, round(base * (0.5 + 0.5 * used_ratio) - drop_penalty, 3)))
+
+
+# ---------------------------------------------------------------------------
+# 多论文对比（对应「⚖ 多论文对比」标签 / POST /api/compare）
+# ---------------------------------------------------------------------------
+
+def compare(papers: list[dict], aspect: str = "") -> dict:
+    """对比多篇论文。优先 LLM，离线降级为结构化模板 + 原文要点。"""
+    aspects = [a.strip() for a in re.split(r"[，,、\n]+", aspect or "") if a.strip()] \
+        or ["核心方法", "参数规模", "实验结论", "局限性"]
+
+    # 为每篇论文用 aspect 作为检索词抽最相关的证据块
+    per_paper: list[tuple[dict, list[dict]]] = []
+    all_evidence: list[dict] = []
+    for p in papers:
+        ev = _evidence(aspect or " ".join(aspects), [p["id"]], top_k=6)
+        per_paper.append((p, ev))
+        all_evidence.extend(ev)
+
+    if llm.is_available():
+        prompt = _build_compare_prompt(per_paper, aspects)
+        try:
+            text = llm.chat([{"role": "user", "content": prompt}], max_tokens=1800)
+            mode = "llm"
+        except Exception as exc:
+            text = _offline_compare(per_paper, aspects) + f"\n\n（LLM 调用失败：{exc}）"
+            mode = "fallback"
+    else:
+        text = _offline_compare(per_paper, aspects)
+        mode = "offline"
+
+    cleaned, used, dropped = verify_citations(text, all_evidence)
+    sources = [ev for ev in all_evidence if ev["sid"] in used]
+    confidence = _confidence(all_evidence, used, dropped) if all_evidence else 0.0
+    return {
+        "answer": cleaned,
+        "sources": sources,
+        "confidence": confidence,
+        "mode": mode,
+        "mode_label": {"llm": "LLM 生成", "fallback": "稳健模式",
+                       "offline": "稳健模式"}.get(mode, mode),
+        "dropped_citations": dropped,
+        "evidence_count": len(all_evidence),
+    }
+
+
+def _build_compare_prompt(per_paper: list[tuple[dict, list[dict]]],
+                          aspects: list[str]) -> str:
+    blocks = []
+    for p, ev in per_paper:
+        blocks.append(
+            f"## {p.get('title')}（{p.get('arxiv_id') or p.get('year', '')}）\n"
+            f"摘要：{(p.get('abstract') or '（无摘要）')[:600]}\n"
+            f"相关证据：\n{llm.format_evidence(ev) if ev else '（无匹配证据）'}"
+        )
+    return (
+        f"请从以下维度对比这些论文：{', '.join(aspects)}。\n"
+        "要求：只依据给出的证据和摘要，不得编造；每个关键判断后用 [S#] 标注证据来源；"
+        "用中文，按维度分小节，每节给出各论文的对比。\n\n" + "\n\n".join(blocks)
+    )
+
+
+def _offline_compare(per_paper: list[tuple[dict, list[dict]]],
+                     aspects: list[str]) -> str:
+    """无 LLM 时的对比模板：每篇论文一行卡片 + 各维度的原文要点。"""
+    lines = ["**对比概览**", ""]
+    for p, ev in per_paper:
+        arxiv = p.get("arxiv_id") or f"{p.get('year') or 'n.d.'}"
+        abs_snip = snippet(p.get("abstract") or "", 180) or "（无摘要）"
+        lines.append(f"- **{p.get('title')}**（{arxiv}）：{abs_snip}")
+    lines.append("")
+
+    # 每个维度下，逐篇给出最相关的原文证据
+    for asp in aspects:
+        lines.append(f"**{asp}**")
+        for p, ev in per_paper:
+            if not ev:
+                lines.append(f"- {p.get('title')[:30]}…：未找到直接证据")
+                continue
+            # 取该维度下分数最高的 1–2 条
+            top = sorted(ev, key=lambda e: e.get("score", 0), reverse=True)[:2]
+            for ev_i in top:
+                page = ev_i.get("page")
+                section = norm_ws(ev_i.get("section") or "")
+                where = f"第 {page} 页" + (f" · {section}" if section else "")
+                body = snippet(ev_i["text"], 160)
+                lines.append(f"- {p.get('title')[:30]}…：{body}（{where}）[{ev_i['sid']}]")
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
