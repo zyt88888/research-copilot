@@ -74,7 +74,7 @@ function PaperPanel({ paper, focus }: {
     }
   }, [chunks, bbox, pid]);
 
-  // 双语翻译（按当前页段落）
+  // 双语翻译（按当前页段落）：带重试，失败保留已有译文
   useEffect(() => {
     if (!chunks) return;
     if (lang !== "zh") { setTrans({}); return; }
@@ -83,15 +83,32 @@ function PaperPanel({ paper, focus }: {
       .map(c => c.id.split(":").pop() as string);
     if (!ids.length) return;
     let alive = true;
-    fetch(`${apiBase()}/api/translate`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "paper", paper_id: pid, lang: "zh", chunk_ids: ids, limit: 300 }),
-    }).then(r => r.json()).then(j => {
-      if (!alive) return;
-      const map: Record<string, string> = {};
-      for (const item of j.items || []) map[item.chunk_id] = item.translation;
-      setTrans(prev => ({ ...prev, ...map }));
-    }).catch(() => { if (alive) setTrans({}); });
+
+    const tryFetch = (attempt: number) => {
+      fetch(`${apiBase()}/api/translate`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "paper", paper_id: pid, lang: "zh", chunk_ids: ids, limit: 300 }),
+      }).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }).then(j => {
+        if (!alive) return;
+        const map: Record<string, string> = {};
+        let cnt = 0;
+        for (const item of j.items || []) {
+          if (item.translation) { map[item.chunk_id] = item.translation; cnt++; }
+        }
+        if (cnt === 0 && attempt < 3) {
+          setTimeout(() => tryFetch(attempt + 1), 1200 * attempt);
+          return;
+        }
+        setTrans(prev => ({ ...prev, ...map }));
+      }).catch(() => {
+        if (!alive) return;
+        if (attempt < 3) setTimeout(() => tryFetch(attempt + 1), 800 * attempt);
+      });
+    };
+    tryFetch(1);
     return () => { alive = false; };
   }, [lang, pid, chunks, page]);
 

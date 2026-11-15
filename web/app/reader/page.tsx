@@ -28,6 +28,9 @@ function Inner() {
   const [page, setPage] = useState(0);
   const [lang, setLang] = useState<"zh" | "en">("zh");
   const [trans, setTrans] = useState<Record<string, string>>({});
+  const [transStatus, setTransStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [transErr, setTransErr] = useState<string>("");
+  const [transReloadKey, setTransReloadKey] = useState(0);
   const [query, setQuery] = useState("");
   const [hit, setHit] = useState<string | null>(null);
   const [pick, setPick] = useState<{ text: string; x: number; y: number; w: number } | null>(null);
@@ -153,26 +156,58 @@ function Inner() {
     return () => clearTimeout(t);
   }, [evidence, hit, page]);
 
+  // 翻译加载：带重试（最多 3 次），失败时保留已有译文并给出可见的重试按钮，
+  // 避免网络抖动 / NMT 预热未完成时译文静默消失。
   useEffect(() => {
     if (!pid || !meta) return;
-    if (lang !== "zh") { setTrans({}); return; }
-    // 只取当前页的可译段落，避免长文档因分段上限而整页无译文
+    if (lang !== "zh") { setTrans({}); setTransStatus("idle"); return; }
     const ids = chunks
       .filter(c => c.page === page + 1 && ["paragraph", "ocr", "caption"].includes(c.kind))
       .map(c => c.id.split(":").pop() as string);
-    if (!ids.length) { setTrans({}); return; }
+    if (!ids.length) { setTrans({}); setTransStatus("idle"); return; }
     let alive = true;
-    fetch(`${apiBase()}/api/translate`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "paper", paper_id: pid, lang: "zh", chunk_ids: ids, limit: 300 }),
-    }).then(r => r.json()).then(j => {
-      if (!alive) return;
-      const map: Record<string, string> = {};
-      for (const item of j.items || []) map[item.chunk_id] = item.translation;
-      setTrans(map);
-    }).catch(() => { if (alive) setTrans({}); });
+    setTransStatus("loading");
+
+    const tryFetch = (attempt: number) => {
+      fetch(`${apiBase()}/api/translate`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "paper", paper_id: pid, lang: "zh", chunk_ids: ids, limit: 300 }),
+      }).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }).then(j => {
+        if (!alive) return;
+        const map: Record<string, string> = {};
+        let translatedCount = 0;
+        for (const item of j.items || []) {
+          if (item.translation) {
+            map[item.chunk_id] = item.translation;
+            translatedCount++;
+          }
+        }
+        // 译文为空通常是 NMT 仍在预热，当作可重试错误
+        if (translatedCount === 0 && attempt < 3) {
+          setTimeout(() => tryFetch(attempt + 1), 1200 * attempt);
+          return;
+        }
+        // 合并到已有译文，不覆盖其它页已加载的内容
+        setTrans(prev => ({ ...prev, ...map }));
+        setTransStatus(translatedCount > 0 ? "ok" : "error");
+        if (translatedCount === 0) setTransErr("本页暂无可用译文（翻译服务可能仍在预热，请重试）");
+      }).catch(err => {
+        if (!alive) return;
+        if (attempt < 3) {
+          setTimeout(() => tryFetch(attempt + 1), 800 * attempt);
+        } else {
+          // 保留已有译文，只标记错误状态
+          setTransStatus("error");
+          setTransErr(err instanceof Error ? err.message : String(err));
+        }
+      });
+    };
+    tryFetch(1);
     return () => { alive = false; };
-  }, [lang, pid, meta, page, chunks]);
+  }, [lang, pid, meta, page, chunks, transReloadKey]);
 
   if (!pid) return (
     <div className="card">
@@ -205,6 +240,21 @@ function Inner() {
             onClick={() => setLang(lang === "zh" ? "en" : "zh")}>
             {lang === "zh" ? "🔄 隐藏中文译文（仅原文）" : "🔄 显示中文译文（双语对照）"}
           </button>
+          {lang === "zh" && transStatus === "loading" && (
+            <span className="chip" style={{ fontSize: 12 }}>⏳ 正在加载译文…</span>
+          )}
+          {lang === "zh" && transStatus === "ok" && (
+            <span className="chip" style={{ fontSize: 12, background: "#dcfce7", borderColor: "#22c55e" }}>
+              ✅ 译文已就绪
+            </span>
+          )}
+          {lang === "zh" && transStatus === "error" && (
+            <button className="btn ghost" style={{ padding: "2px 10px", fontSize: 12, color: "#dc2626", borderColor: "#fecaca" }}
+              onClick={() => { setTransErr(""); setTransStatus("loading"); setTransReloadKey(k => k + 1); }}
+              title={transErr}>
+              ⚠ 译文加载失败，点击重试
+            </button>
+          )}
           <input type="text" placeholder="页内搜索…"
             value={query} onChange={(e) => setQuery(e.target.value)} />
           <button className="btn ghost" onClick={() => {

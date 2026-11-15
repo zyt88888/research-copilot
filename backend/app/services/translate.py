@@ -68,8 +68,15 @@ def translate_chunks(paper_id: str, lang: str = "zh",
         except Exception as exc:
             mode = f"error:{exc}"
     elif todo:
-        # 无在线模型：走本地离线 NMT（镜像内预置，无需任何 Key）
-        translated = nmt.translate([c["text"] for c in todo]) if lang == "zh" else None
+        # 无在线模型：走本地离线 NMT（镜像内预置，无需任何 Key）。
+        # 若 NMT 尚未预热完成，短暂等待重试最多 4 次（每次 2s），避免启动初期返回空译文。
+        translated = None
+        for attempt in range(4):
+            translated = nmt.translate([c["text"] for c in todo]) if lang == "zh" else None
+            if translated:
+                break
+            import time
+            time.sleep(2)
         if translated and len(translated) == len(todo):
             mode = "nmt"
             with get_conn() as conn:
