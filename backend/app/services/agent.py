@@ -491,6 +491,23 @@ def _relevance(text: str, keywords: set[str]) -> int:
     return sum(1 for k in keywords if k in low)
 
 
+def _clean_conclusion_block(text: str) -> str:
+    """清洗结论块：剥掉列表编号/项目符号，丢弃碎片与章节标题行。"""
+    kept: list[str] = []
+    for line in text.split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        s = re.sub(r"^\d+[\.\)]\s*", "", s)      # 「1. xxx」→「xxx」
+        s = re.sub(r"^[-*•]\s*", "", s)          # 「- xxx」→「xxx」
+        if len(s) < 12 and not s.endswith(("。", "！", "？", ".", "；", ";")):
+            continue                              # 碎片（如「…」）丢弃
+        if _looks_like_section_header(s):
+            continue
+        kept.append(s)
+    return "\n".join(kept).strip()
+
+
 def _extract_conclusion(answer: str) -> str:
     """从 RAG answer 中提取「综合结论」段落到下一个 ** 标题为止。"""
     if not answer:
@@ -498,8 +515,8 @@ def _extract_conclusion(answer: str) -> str:
     # 找 **综合结论** 段落
     m = re.search(r"\*\*综合结论\*\*\s*\n?(.*?)(?=\n\*\*|\Z)", answer, re.DOTALL)
     if m:
-        text = m.group(1).strip()
-        if text and not _looks_like_section_header(text):
+        text = _clean_conclusion_block(m.group(1))
+        if text:
             return text
     # 没有综合结论段或内容是标题，取第一段有意义的非空内容
     for line in answer.split("\n"):

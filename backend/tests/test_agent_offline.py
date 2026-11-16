@@ -235,3 +235,70 @@ def test_plan_always_ends_with_final():
 def test_plan_fallback_when_no_keyword():
     plan = _offline_plan("嗯")
     assert any(s["tool"] == "search_library" for s in plan)
+
+
+# ---------- 回归：测试暴露后修复的 4 个缺陷 ----------
+
+def test_extract_keywords_drops_chinese_noise_fragment():
+    """缺陷1：中文分词噪音「的区别」不得进入关键词。"""
+    kws = _extract_keywords("两者的区别")
+    assert kws == set()
+
+
+def test_extract_keywords_keeps_valid_chinese_term():
+    """反例保护：不含停用词的中文术语必须保留。"""
+    kws = _extract_keywords("注意力机制")
+    assert "注意力机制" in kws
+
+
+def test_summary_evidence_not_prefixed_by_section():
+    """缺陷2：证据正文不得拼接 section 名，否则长正文会被误判成章节标题而整条丢弃。"""
+    out = _offline_summary("Transformer 的核心创新是什么", [_obs_answer_answer()])
+    evidence_block = out.split("**支撑证据**")[1]
+    # 正文保留
+    assert "The Transformer allows BERT" in evidence_block
+    # section 名不再混入证据文本
+    assert "3.1 Fine-tuning" not in evidence_block
+
+
+def test_summary_long_body_with_numbered_section_still_kept():
+    """缺陷2 的具体表现：正文以 "3.1 ..." 这类编号开头时也不能被当成标题过滤。"""
+    obs = {
+        "tool": "answer_question",
+        "answer": "",
+        "sources": [{"sid": "S1", "paper_title": "BERT", "page": 5,
+                     "section": "3.1 Fine-tuning", "text": LONG_TEXT}],
+    }
+    out = _offline_summary("fine-tuning", [obs])
+    assert "**支撑证据**" in out
+    assert "fine-tuning straightforward" in out
+
+
+def test_extract_conclusion_skips_evidence_number_line():
+    """缺陷3：证据列表的编号行「1. …」不是结论。"""
+    answer = ("**综合结论**\n1. …\n\n"
+              "Self-attention lets each position attend to all positions in the layer below.")
+    got = _extract_conclusion(answer)
+    assert got.startswith("Self-attention lets each position")
+
+
+def test_extract_conclusion_numbered_line_with_content_kept():
+    """反例保护：编号行如果本身是完整句子，剥掉编号后仍可作为结论。"""
+    answer = "**综合结论**\n1. Self-attention is the only mechanism used in the Transformer block."
+    assert _extract_conclusion(answer).startswith("Self-attention is the only mechanism")
+
+
+def test_summary_keeps_chinese_conclusion_under_30_chars():
+    """缺陷4：25 字中文结论不应被「过短」规则替换。"""
+    conclusion = "BERT 通过自注意力统一建模单句与句对任务。"
+    assert len(conclusion) < 30
+    out = _offline_summary("Transformer 的核心创新是什么", [_obs_answer_answer(conclusion)])
+    assert conclusion in out
+
+
+def test_summary_replaces_number_only_conclusion():
+    """缺陷4 的另一面：纯碎片「1. …」作为结论时必须回退到证据正文。"""
+    out = _offline_summary("Transformer 的核心创新是什么", [_obs_answer_answer("1. …")])
+    conclusion_block = out.split("**综合结论**")[1].split("**支撑证据**")[0]
+    assert "1. …" not in conclusion_block
+    assert "The Transformer allows BERT" in conclusion_block
