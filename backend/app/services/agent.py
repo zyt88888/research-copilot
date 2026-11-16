@@ -471,10 +471,15 @@ def _extract_keywords(text: str) -> set[str]:
     stop = {"the", "and", "for", "with", "that", "this", "from", "have", "which",
             "什么", "怎么", "如何", "为什么", "哪些", "对比", "比较", "区别", "分析",
             "总结", "归纳", "请问", "帮我", "一下", "它们", "我们", "你们"}
+    zh_stop = {w for w in stop if re.search(r"[\u4e00-\u9fff]", w)}
     words: set[str] = set()
     for w in re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z]{3,}", text.lower()):
-        if w not in stop:
-            words.add(w)
+        if w in stop:
+            continue
+        # 中文分词不精确时（如「的区别」）把含停用词的整段丢掉，避免噪音关键词
+        if re.search(r"[\u4e00-\u9fff]", w) and any(s in w for s in zh_stop):
+            continue
+        words.add(w)
     return words
 
 
@@ -502,6 +507,9 @@ def _extract_conclusion(answer: str) -> str:
         if not line or line.startswith("**") or line.startswith("#"):
             continue
         if _looks_like_section_header(line):
+            continue
+        # 跳过证据列表的编号行（如「1. …」），它不是结论
+        if re.match(r"^\d+[\.\)]\s*\S{0,12}$", line):
             continue
         return snippet(line, 300)
     return ""
@@ -536,10 +544,14 @@ def _offline_summary(task: str, observations: list[dict]) -> str:
         if tool == "answer_question":
             answer_text = str(obs.get("answer", ""))
             for r in (obs.get("sources") or []):
+                body = (r.get("text") or "").strip()
+                if not body:
+                    continue
+                # 只存正文：把 section 名拼进正文会被 _looks_like_section_header 误判成标题
                 all_evidence.append({
-                    "text": r.get("section", "") + " " + r.get("text", ""),
+                    "text": body, "section": r.get("section"),
                     "page": r.get("page"), "paper_title": r.get("paper_title"),
-                    "sid": r.get("sid"), "relevance": _relevance(r.get("text", ""), keywords)})
+                    "sid": r.get("sid"), "relevance": _relevance(body, keywords)})
         elif tool == "search_library":
             for it in obs.get("items", []):
                 all_evidence.append({
@@ -558,8 +570,10 @@ def _offline_summary(task: str, observations: list[dict]) -> str:
     conclusion = ""
     if answer_text:
         conclusion = _extract_conclusion(answer_text)
-    # 如果结论是 section header 或太短，从相关证据里找真正的段落
-    if (not conclusion or _looks_like_section_header(conclusion) or len(conclusion) < 30) and all_evidence:
+    # 结论是章节标题、空、或无标点的短碎片时才回退到证据正文（25 字中文句子算有效结论）
+    too_short = (len(conclusion) < 15
+                 and not conclusion.rstrip().endswith(("。", "！", "？", ".", "；", ";")))
+    if (not conclusion or _looks_like_section_header(conclusion) or too_short) and all_evidence:
         candidates = [e for e in all_evidence if not _looks_like_section_header(e["text"]) and len(e["text"]) > 50]
         if candidates:
             top = max(candidates, key=lambda e: e["relevance"])
