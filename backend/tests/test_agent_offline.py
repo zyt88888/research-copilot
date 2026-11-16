@@ -18,7 +18,9 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+from app.services import agent
 from app.services.agent import (
+    _clean_conclusion_block,
     _extract_conclusion,
     _extract_keywords,
     _looks_like_section_header,
@@ -302,3 +304,85 @@ def test_summary_replaces_number_only_conclusion():
     conclusion_block = out.split("**综合结论**")[1].split("**支撑证据**")[0]
     assert "1. …" not in conclusion_block
     assert "The Transformer allows BERT" in conclusion_block
+
+
+# ---------- _clean_conclusion_block 直接测试 ----------
+
+def test_clean_block_strips_list_markers():
+    """编号/项目符号被剥掉，正文保留。"""
+    raw = "1. Self-attention is the primary mechanism of the Transformer.\n- Multi-head attention runs several heads in parallel."
+    out = _clean_conclusion_block(raw)
+    assert out.startswith("Self-attention is the primary mechanism")
+    assert "Multi-head attention runs several heads" in out
+    assert not out.startswith("1.")
+    assert "- " not in out
+
+
+def test_clean_block_drops_fragments_and_headers():
+    """碎片（「…」）与章节标题行被丢弃。"""
+    raw = "…\n12.7.2 Masked self-attention\nATTENTION\nSelf-attention lets each position attend to all positions."
+    out = _clean_conclusion_block(raw)
+    assert "12.7.2" not in out
+    assert "ATTENTION" not in out
+    assert out.strip() == "Self-attention lets each position attend to all positions."
+
+
+def test_clean_block_keeps_multi_line_content():
+    """多行有效结论全部保留（用换行连接）。"""
+    raw = "Self-attention is the core building block of the Transformer.\nIt allows parallel computation over all positions."
+    out = _clean_conclusion_block(raw)
+    assert "\n" in out
+    assert out.count("\n") == 1
+
+
+def test_clean_block_empty_input():
+    assert _clean_conclusion_block("") == ""
+    assert _clean_conclusion_block("\n\n  \n") == ""
+
+
+# ---------- 工具层：修复点回归 ----------
+
+def test_run_tool_answer_question_passes_text(monkeypatch):
+    """缺陷2 的源头：answer_question 必须把 sources 的 text 传给上层（之前只有 section）。"""
+    fake = {
+        "answer": "**综合结论**\n结论句。",
+        "mode": "offline",
+        "confidence": 0.8,
+        "sources": [{"sid": "S1", "paper_title": "BERT", "page": 5,
+                     "section": "3.1 Fine-tuning", "text": LONG_TEXT}],
+    }
+    monkeypatch.setattr(agent.rag, "answer", lambda q, pids=None: fake)
+    res = agent._run_tool("answer_question", {"query": "fine-tuning"})
+    assert res["sources"][0]["text"] == LONG_TEXT
+    assert res["sources"][0]["section"] == "3.1 Fine-tuning"
+
+
+def test_run_tool_compare_papers_uses_english_keywords(monkeypatch):
+    """缺陷3：compare 未指定论文时，用英文技术词检索相关论文，而非取前 3 篇。"""
+    captured = {}
+
+    def fake_search(query, ids=None, top_k=6):
+        captured["query"] = query
+        return [{"paper_id": "p1", "page": 1, "bbox": None, "section": "s", "text": "t"},
+                {"paper_id": "p2", "page": 2, "bbox": None, "section": "s", "text": "t"},
+                {"paper_id": "p1", "page": 3, "bbox": None, "section": "s", "text": "t"}]
+
+    monkeypatch.setattr(agent, "hybrid_search", fake_search)
+    monkeypatch.setattr(agent, "paper_meta", lambda pid: {"id": pid, "title": pid.upper()})
+    monkeypatch.setattr(agent.rag, "compare",
+                        lambda papers, aspect="": {"answer": "对比概览", "sources": [], "mode": "offline"})
+
+    res = agent._run_tool("compare_papers",
+                          {"aspect": "对比 self-attention 和 cross-attention 的区别"})
+    assert captured["query"] == "self-attention cross-attention"
+    assert res["papers"] == ["p1", "p2"]  # 去重且最多 3 篇，不取全库前 3
+
+
+def test_run_tool_compare_papers_needs_two(monkeypatch):
+    """只检索到 1 篇时返回明确错误，而不是拿无关论文凑数。"""
+    monkeypatch.setattr(agent, "hybrid_search",
+                        lambda q, ids=None, top_k=6: [{"paper_id": "p1", "page": 1,
+                                                       "bbox": None, "section": "s", "text": "t"}])
+    monkeypatch.setattr(agent, "paper_meta", lambda pid: {"id": pid, "title": "P1"})
+    res = agent._run_tool("compare_papers", {"aspect": "self-attention"})
+    assert "error" in res
