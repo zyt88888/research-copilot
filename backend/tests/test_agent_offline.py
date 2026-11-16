@@ -386,3 +386,44 @@ def test_run_tool_compare_papers_needs_two(monkeypatch):
     monkeypatch.setattr(agent, "paper_meta", lambda pid: {"id": pid, "title": "P1"})
     res = agent._run_tool("compare_papers", {"aspect": "self-attention"})
     assert "error" in res
+
+
+# ---------- 执行循环修复：用户已选论文时必须原样使用 ----------
+
+def test_run_tool_compare_respects_user_paper_ids(monkeypatch):
+    """用户已在界面勾选论文时，不得再用检索结果覆盖（原执行循环的缺陷）。"""
+    def boom(*a, **kw):
+        raise AssertionError("指定了 paper_ids 时不应再调 hybrid_search")
+
+    monkeypatch.setattr(agent, "hybrid_search", boom)
+    monkeypatch.setattr(agent, "paper_meta", lambda pid: {"id": pid, "title": pid.upper()})
+    monkeypatch.setattr(agent.rag, "compare",
+                        lambda papers, aspect="": {"answer": "对比概览", "sources": [], "mode": "offline"})
+
+    res = agent._run_tool("compare_papers",
+                          {"paper_ids": ["pA", "pB"], "aspect": "核心方法"})
+    assert res["papers"] == ["pA", "pB"]
+
+
+# ---------- 其余证据来源 ----------
+
+def test_summary_includes_future_work_items():
+    """future_work 工具的条目也应进入支撑证据。"""
+    obs = {"tool": "future_work", "items": [
+        {"title": "Extending the model to multilingual retrieval with limited supervision",
+         "status": "open", "paper": "X", "page": 3}]}
+    out = _offline_summary("未来的研究方向有哪些", [obs])
+    assert "multilingual retrieval" in out
+
+
+def test_summary_no_compare_section_without_compare_result():
+    """对比类任务但 compare_papers 无结果时，不应输出空的对比分析段。"""
+    obs = {"tool": "compare_papers", "answer": ""}
+    out = _offline_summary("对比 self-attention 和 cross-attention 的区别", [obs])
+    assert "**对比分析**" not in out
+
+
+def test_plan_future_work_route():
+    """「未来工作」类任务必须路由到 future_work。"""
+    plan = _offline_plan("这篇论文的未来工作有哪些")
+    assert any(s["tool"] == "future_work" for s in plan)
