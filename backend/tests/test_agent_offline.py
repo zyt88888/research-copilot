@@ -427,3 +427,84 @@ def test_plan_future_work_route():
     """「未来工作」类任务必须路由到 future_work。"""
     plan = _offline_plan("这篇论文的未来工作有哪些")
     assert any(s["tool"] == "future_work" for s in plan)
+
+
+# ---------- run() 轻量集成测试（离线模式，DB/工具全部 mock） ----------
+
+def _stub_run(monkeypatch, plan=None):
+    """把 run() 的外部依赖全部隔离，返回工具调用记录。"""
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(agent.llm, "is_available", lambda: False)
+    monkeypatch.setattr(agent, "execute", lambda *a, **kw: None)  # 不落库
+    if plan is not None:
+        monkeypatch.setattr(agent, "_offline_plan", lambda task: plan)
+    monkeypatch.setattr(agent, "_offline_summary", lambda task, obs: "FINAL_ANSWER")
+
+    def fake_tool(tool, args):
+        calls.append((tool, dict(args)))
+        return {"tool": tool, "answer": "", "sources": [], "papers": []}
+
+    monkeypatch.setattr(agent, "_run_tool", fake_tool)
+    return calls
+
+
+def test_run_offline_event_sequence(monkeypatch):
+    """事件序列必须是 start→plan→(step_start/tool_result)*→token→final，且不执行 final 工具。"""
+    calls = _stub_run(monkeypatch)
+    events = list(agent.run("对比 self-attention 和 cross-attention 的区别"))
+    types = [e["type"] for e in events]
+    assert types[0] == "start"
+    assert types[1] == "plan"
+    assert types[-2:] == ["token", "final"]
+    assert events[-1]["answer"] == "FINAL_ANSWER"
+    # 每个 step_start 后紧跟对应的 tool_result
+    body = types[2:-2]
+    assert len(body) % 2 == 0
+    for i in range(0, len(body), 2):
+        assert body[i] == "step_start"
+        assert body[i + 1] == "tool_result"
+    # final 只是计划终点，不应进入工具执行
+    assert all(tool != "final" for tool, _ in calls)
+
+
+def test_run_offline_answer_question_defaults_query(monkeypatch):
+    """answer_question 未显式给 query 时，必须回退为原始任务文本。"""
+    calls = _stub_run(monkeypatch)
+    task = "Transformer 的核心创新是什么"
+    list(agent.run(task))
+    aq = [args for tool, args in calls if tool == "answer_question"]
+    assert aq and aq[0]["query"] == task
+
+
+def test_run_offline_compare_without_user_papers(monkeypatch):
+    """用户未选论文时，compare_papers 不得被塞入全库论文，交给工具内部检索。"""
+    calls = _stub_run(monkeypatch)
+    list(agent.run("对比 self-attention 和 cross-attention 的区别"))
+    cmp_args = [args for tool, args in calls if tool == "compare_papers"]
+    assert cmp_args, "对比任务必须调用 compare_papers"
+    assert "paper_ids" not in cmp_args[0]
+
+
+def test_run_offline_respects_user_paper_ids(monkeypatch):
+    """用户已选论文时，compare_papers 与 answer_question 都必须限定在该范围。"""
+    calls = _stub_run(monkeypatch)
+    list(agent.run("对比 self-attention 和 cross-attention 的区别",
+                   paper_ids=["pA", "pB"]))
+    for tool, args in calls:
+        if tool in ("compare_papers", "answer_question"):
+            assert args.get("paper_ids") == ["pA", "pB"], tool
+
+
+def test_run_offline_skips_duplicate_tool_calls(monkeypatch):
+    """相同工具+相同参数的重复规划步骤只执行一次。"""
+    plan = [
+        {"title": "检索", "tool": "search_library", "args": {"query": "attention"}},
+        {"title": "再检索", "tool": "search_library", "args": {"query": "attention"}},
+        {"title": "总结", "tool": "final"},
+    ]
+    calls = _stub_run(monkeypatch, plan=plan)
+    events = list(agent.run("attention"))
+    assert [tool for tool, _ in calls] == ["search_library"]
+    # 重复步骤不产生 step_start/tool_result，但仍以 token/final 收尾
+    assert sum(1 for e in events if e["type"] == "tool_result") == 1
+    assert events[-1]["type"] == "final"
