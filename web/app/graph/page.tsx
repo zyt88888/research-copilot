@@ -116,8 +116,8 @@ export default function GraphPage() {
   const sel = selected ? byId[selected] : null;
 
   return (
-    <div className="grid">
-      <section className="card">
+    <div className="graph-page">
+      <section className="card graph-card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ margin: 0 }}>🕸 局部引用图谱</h2>
           <div className="row" style={{ gap: 6 }}>
@@ -164,6 +164,7 @@ export default function GraphPage() {
             action={<a className="btn ghost" href="/">前往文库</a>} />
         ) : (
         <>
+        <div className="graph-fill">
         <div className="graph-scroll">
         <svg width="100%" viewBox={`0 0 ${W} ${H}`}
           style={{ marginTop: 12, border: "1px solid var(--line)", borderRadius: 10,
@@ -247,9 +248,10 @@ export default function GraphPage() {
             </div>
           )}
         </div>
+        </div>
 
         {sel && (
-          <div className="card" style={{ marginTop: 12, background: "#f8fafc" }}>
+          <div className="card graph-detail" style={{ background: "#f8fafc" }}>
             <div className="row" style={{ justifyContent: "space-between" }}>
               <h3 style={{ margin: 0, fontSize: 15 }}>{sel.title}</h3>
               <button className="btn ghost" onClick={() => setSelected(null)}>关闭</button>
@@ -271,7 +273,7 @@ export default function GraphPage() {
           <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 6 }}>
             论文列表（按 PageRank 排序，点击即选中节点）
           </div>
-          <div style={{ maxHeight: 240, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
+          <div className="graph-list" style={{ border: "1px solid var(--line)", borderRadius: 8 }}>
             {nodes.filter(visible).map((n, idx) => (
               <div key={n.id}
                 onClick={() => { setSelected(n.id); setHover(n.id); }}
@@ -298,9 +300,9 @@ export default function GraphPage() {
       </section>
 
       {future && (
-        <section className="card">
+        <section className="card graph-side">
           <h3 style={{ marginTop: 0 }}>🔮 前沿 Idea（{future.open_count}/{future.total} 未被解决）</h3>
-          <div style={{ maxHeight: 340, overflowY: "auto", marginTop: 8 }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", marginTop: 8 }}>
             {future.items.map((it: FutureItem, i: number) => (
               <div key={i} style={{
                 borderLeft: `3px solid ${it.status === "open" ? "#10b981" : "#cbd5e1"}`,
