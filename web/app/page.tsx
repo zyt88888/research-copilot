@@ -1,6 +1,6 @@
 ﻿"use client";
 import { apiBase } from "../lib/apiBase";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import { Empty, ErrorState, Skeleton } from "../components/State";
 
 type Paper = {
@@ -39,7 +39,7 @@ async function loadCover(paperId: string): Promise<string | null> {
 }
 
 /** 单篇论文卡片：独立 Hook 懒加载封面。 */
-function PaperCard({ p }: { p: Paper }) {
+function PaperCard({ p, onDelete }: { p: Paper; onDelete?: (p: Paper) => void }) {
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverLoading, setCoverLoading] = useState(true);
   const [coverFailed, setCoverFailed] = useState(false);
@@ -111,6 +111,14 @@ function PaperCard({ p }: { p: Paper }) {
             href={`/chat?id=${p.id}`}>💬 问答</a>
           <a className="btn ghost" style={{ flex: 1, textAlign: "center" }}
             href={`/reader?id=${p.id}`}>📖 阅读</a>
+          {onDelete && (
+            <button className="btn ghost" title="从文库删除这篇论文"
+              aria-label={`删除 ${p.title || p.id}`}
+              onClick={() => onDelete(p)}
+              style={{ flex: "0 0 auto", padding: "4px 10px", color: "#dc2626", borderColor: "#fecaca" }}>
+              🗑
+            </button>
+          )}
         </div>
       </div>
     </article>
@@ -188,6 +196,41 @@ export default function LibraryPage() {
   }
 
   useEffect(() => { refresh(); }, []);
+
+  // 删除：单篇 / 清空，均需二次确认
+  const [delTarget, setDelTarget] = useState<Paper | null>(null);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [delErr, setDelErr] = useState<string | null>(null);
+
+  async function confirmDeleteOne() {
+    if (!delTarget) return;
+    setDeleting(true); setDelErr(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/papers/${delTarget.id}`, { method: "DELETE" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || `删除失败（HTTP ${r.status}）`);
+      coverCache.delete(delTarget.id);
+      setPapers(ps => ps.filter(x => x.id !== delTarget.id));
+      setDelTarget(null);
+    } catch (e) {
+      setDelErr(e instanceof Error ? e.message : String(e));
+    } finally { setDeleting(false); }
+  }
+
+  async function confirmClearAll() {
+    setDeleting(true); setDelErr(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/papers`, { method: "DELETE" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || `清空失败（HTTP ${r.status}）`);
+      coverCache.clear();
+      setPapers([]);
+      setClearOpen(false);
+    } catch (e) {
+      setDelErr(e instanceof Error ? e.message : String(e));
+    } finally { setDeleting(false); }
+  }
 
   async function handleFiles(files: FileList | null) {
     if (!files || !files.length) return;
@@ -378,7 +421,16 @@ export default function LibraryPage() {
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h3 style={{ margin: 0 }}>文库（{papers.length}）</h3>
-          <button className="btn ghost" disabled={loading} onClick={() => refresh()}>刷新</button>
+          <div className="row" style={{ gap: 8 }}>
+            {papers.length > 0 && (
+              <button className="btn ghost" disabled={loading || deleting}
+                onClick={() => { setDelErr(null); setClearOpen(true); }}
+                style={{ color: "#dc2626", borderColor: "#fecaca" }}>
+                🗑 清空文库
+              </button>
+            )}
+            <button className="btn ghost" disabled={loading} onClick={() => refresh()}>刷新</button>
+          </div>
         </div>
         {loading ? (
           <div style={{ marginTop: 16 }}>
@@ -391,7 +443,10 @@ export default function LibraryPage() {
           </div>
         ) : (
         <div className="grid papers" style={{ marginTop: 12 }}>
-          {papers.map((p) => <PaperCard key={p.id} p={p} />)}
+          {papers.map((p) => (
+            <PaperCard key={p.id} p={p}
+              onDelete={(x) => { setDelErr(null); setDelTarget(x); }} />
+          ))}
           {papers.length === 0 && (
             <div style={{ gridColumn: "1 / -1" }}>
               <Empty icon="📚" title="文库还是空的"
@@ -402,6 +457,84 @@ export default function LibraryPage() {
         </div>
         )}
       </section>
+
+      <ConfirmDialog
+        open={!!delTarget}
+        title="删除这篇论文？"
+        confirmText="确认删除"
+        busy={deleting}
+        err={delErr}
+        onCancel={() => { if (!deleting) { setDelTarget(null); setDelErr(null); } }}
+        onConfirm={confirmDeleteOne}
+        body={<>
+          <div>即将从文库删除：<strong>{delTarget?.title || delTarget?.id}</strong></div>
+          <div style={{ marginTop: 6 }}>
+            将同时移除该论文的 PDF、解析分块、参考文献、中文译文与封面缓存，删除后不可恢复。
+          </div>
+        </>}
+      />
+
+      <ConfirmDialog
+        open={clearOpen}
+        title="清空整个文库？"
+        confirmText="确认清空全部"
+        busy={deleting}
+        err={delErr}
+        requireText="清空"
+        onCancel={() => { if (!deleting) { setClearOpen(false); setDelErr(null); } }}
+        onConfirm={confirmClearAll}
+        body={<>
+          <div>文库内共 <strong>{papers.length}</strong> 篇论文将被全部删除。</div>
+          <div style={{ marginTop: 6 }}>
+            PDF 文件、解析分块、参考文献、翻译与封面缓存会一并清除，且不可恢复。
+          </div>
+        </>}
+      />
+    </div>
+  );
+}
+
+/** 二次确认弹窗：requireText 非空时必须原样输入该词才能确认。 */
+function ConfirmDialog({ open, title, body, confirmText, requireText, busy, err,
+  onCancel, onConfirm }: {
+  open: boolean; title: string; body?: ReactNode; confirmText: string;
+  requireText?: string; busy?: boolean; err?: string | null;
+  onCancel: () => void; onConfirm: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  useEffect(() => { if (open) setTyped(""); }, [open]);
+  if (!open) return null;
+  const ok = !requireText || typed.trim() === requireText;
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title}
+      onClick={onCancel}
+      style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(15,23,42,.45)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div className="card" onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 460, width: "100%", margin: 0 }}>
+        <h3 style={{ marginTop: 0 }}>⚠ {title}</h3>
+        <div style={{ fontSize: 13, color: "var(--ink-3)", lineHeight: 1.8 }}>{body}</div>
+        {requireText && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 12, marginBottom: 6 }}>
+              此操作不可撤销。请输入「{requireText}」以确认：
+            </div>
+            <input autoFocus value={typed} onChange={(e) => setTyped(e.target.value)}
+              placeholder={requireText} style={{ width: "100%" }} />
+          </div>
+        )}
+        {err && (
+          <div style={{ marginTop: 10, fontSize: 12, color: "#dc2626" }}>删除失败：{err}</div>
+        )}
+        <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+          <button className="btn ghost" onClick={onCancel} disabled={busy}>取消</button>
+          <button className="btn" onClick={onConfirm} disabled={!ok || busy}
+            style={{ background: "#dc2626", borderColor: "#dc2626", color: "#fff",
+              opacity: !ok || busy ? 0.55 : 1 }}>
+            {busy ? "处理中…" : confirmText}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

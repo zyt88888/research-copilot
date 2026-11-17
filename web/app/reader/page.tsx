@@ -1,6 +1,6 @@
 ﻿"use client";
 import { apiBase } from "../../lib/apiBase";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Empty, ErrorState, Skeleton, SkeletonCard } from "../../components/State";
 
@@ -43,6 +43,13 @@ function Inner() {
   const [repro, setRepro] = useState<any>(null);
   const [reco, setReco] = useState<any[] | null>(null);
   const [insightState, setInsightState] = useState<"loading" | "ok" | "fail">("loading");
+
+  // 连续滚动阅读：容器与各页锚点
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const pageEls = useRef<Map<number, HTMLDivElement>>(new Map());
+  // 已拿到译文的 chunk（按 chunk id），避免滚动时重复请求
+  const translatedRef = useRef<Set<string>>(new Set());
+  const pendingRef = useRef<Set<string>>(new Set());
 
   // 学术洞察：复现性 + 相关推荐（不阻塞正文渲染；两个接口都失败时给出提示）
   useEffect(() => {
@@ -147,25 +154,54 @@ function Inner() {
     }
   }, [pid, meta, chunks, wantPage]);
 
-  // 命中证据块后滚动到可视区域居中
+  // 命中证据块 / 搜索结果后滚动到可视区域居中
   useEffect(() => {
-    if (!evidence || !hit) return;
+    if (!hit) return;
     const t = setTimeout(() => {
       document.getElementById(`c-${hit}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 180);
     return () => clearTimeout(t);
-  }, [evidence, hit, page]);
+  }, [hit, evidence]);
 
-  // 翻译加载：带重试（最多 3 次），失败时保留已有译文并给出可见的重试按钮，
+  // 深链 ?page=N：内容渲染后把滚动容器定位到该页
+  useEffect(() => {
+    if (!meta || !chunks.length) return;
+    const p = Math.min(Math.max(wantPage || 1, 1), meta.num_pages || 1);
+    if (p <= 1) return;
+    const t = setTimeout(() => {
+      const el = pageEls.current.get(p);
+      const sc = scrollerRef.current;
+      if (el && sc) sc.scrollTo({ top: Math.max(0, el.offsetTop - 8) });
+    }, 260);
+    return () => clearTimeout(t);
+  }, [chunks, meta, wantPage]);
+
+  // 译文按「当前可视页 + 邻近页」分批加载；滚动到新页时自动补齐。
+  // 带重试（最多 3 次），失败时保留已有译文并给出可见的重试按钮，
   // 避免网络抖动 / NMT 预热未完成时译文静默消失。
   useEffect(() => {
+    if (!pid) return;
+    setTrans({}); setTransStatus("idle"); setTransErr("");
+    translatedRef.current = new Set();
+    pendingRef.current = new Set();
+  }, [pid]);
+
+  useEffect(() => {
     if (!pid || !meta) return;
-    if (lang !== "zh") { setTrans({}); setTransStatus("idle"); return; }
+    if (lang !== "zh") { setTransStatus("idle"); return; }
+    const cur = page + 1;
+    const windowPages = [cur - 1, cur, cur + 1, cur + 2]
+      .filter(p => p >= 1 && p <= (meta.num_pages || 1));
     const ids = chunks
-      .filter(c => c.page === page + 1 && ["paragraph", "ocr", "caption"].includes(c.kind))
+      .filter(c => windowPages.includes(c.page)
+        && ["paragraph", "ocr", "caption"].includes(c.kind)
+        && !translatedRef.current.has(c.id)
+        && !pendingRef.current.has(c.id))
       .map(c => c.id.split(":").pop() as string);
-    if (!ids.length) { setTrans({}); setTransStatus("idle"); return; }
+    if (!ids.length) return;
     let alive = true;
+    ids.forEach(id => pendingRef.current.add(id));
+    const release = () => ids.forEach(id => pendingRef.current.delete(id));
     setTransStatus("loading");
 
     const tryFetch = (attempt: number) => {
@@ -182,6 +218,7 @@ function Inner() {
         for (const item of j.items || []) {
           if (item.translation) {
             map[item.chunk_id] = item.translation;
+            translatedRef.current.add(item.chunk_id);
             translatedCount++;
           }
         }
@@ -190,6 +227,7 @@ function Inner() {
           setTimeout(() => tryFetch(attempt + 1), 1200 * attempt);
           return;
         }
+        release();
         // 合并到已有译文，不覆盖其它页已加载的内容
         setTrans(prev => ({ ...prev, ...map }));
         setTransStatus(translatedCount > 0 ? "ok" : "error");
@@ -199,6 +237,7 @@ function Inner() {
         if (attempt < 3) {
           setTimeout(() => tryFetch(attempt + 1), 800 * attempt);
         } else {
+          release();
           // 保留已有译文，只标记错误状态
           setTransStatus("error");
           setTransErr(err instanceof Error ? err.message : String(err));
@@ -224,8 +263,38 @@ function Inner() {
   );
   if (!meta) return <SkeletonCard rows={7} label="正在载入论文…" />;
 
-  const pageChunks = chunks.filter(c => c.page === page + 1 &&
-    ["paragraph", "table", "ocr", "caption", "formula", "heading"].includes(c.kind));
+  // 连续滚动阅读：按 PDF 页码分组（仅保留有正文的分组），保留原始阅读顺序
+  const READ_KINDS = ["paragraph", "table", "ocr", "caption", "formula", "heading"];
+  const docChunks = chunks.filter(c => READ_KINDS.includes(c.kind));
+  const pageGroups: { page: number; items: Chunk[] }[] = [];
+  for (const c of docChunks) {
+    const last = pageGroups[pageGroups.length - 1];
+    if (last && last.page === c.page) last.items.push(c);
+    else pageGroups.push({ page: c.page, items: [c] });
+  }
+
+  /** 跳转到指定页：把滚动容器滚到该页锚点。 */
+  function gotoPage(p: number) {
+    const el = pageEls.current.get(p);
+    const sc = scrollerRef.current;
+    if (!el || !sc) return;
+    sc.scrollTo({ top: Math.max(0, el.offsetTop - 8), behavior: "smooth" });
+    setPage(p - 1);
+  }
+
+  /** 滚动时把顶部的页号同步到状态，用于译文按可视页加载。 */
+  function onDocScroll() {
+    const sc = scrollerRef.current;
+    if (!sc) return;
+    const probe = sc.scrollTop + 48;
+    let cur = pageGroups[0]?.page ?? 1;
+    for (const g of pageGroups) {
+      const node = pageEls.current.get(g.page);
+      if (node && node.offsetTop <= probe) cur = g.page;
+      else break;
+    }
+    if (cur - 1 !== page) setPage(cur - 1);
+  }
 
   return (
     <div className="grid">
@@ -255,12 +324,15 @@ function Inner() {
               ⚠ 译文加载失败，点击重试
             </button>
           )}
-          <input type="text" placeholder="页内搜索…"
+          <input type="text" placeholder="全文搜索…"
             value={query} onChange={(e) => setQuery(e.target.value)} />
           <button className="btn ghost" onClick={() => {
-            const h = hit ? pageChunks.find(c => c.text.toLowerCase().includes(query.toLowerCase())
-              && c.id > hit) : pageChunks.find(c => c.text.toLowerCase().includes(query.toLowerCase()));
-            setHit(h?.id || null);
+            const q = query.trim().toLowerCase();
+            if (!q) return;
+            const found = docChunks.filter(c => c.text.toLowerCase().includes(q));
+            if (!found.length) { setHit(null); return; }
+            const idx = hit ? found.findIndex(c => c.id === hit) : -1;
+            setHit(found[(idx + 1) % found.length].id);
           }}>查找</button>
         </div>
       </section>
@@ -333,14 +405,16 @@ function Inner() {
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
           <div className="row grow">
-            <button className="btn ghost" disabled={page <= 0} onClick={() => setPage(page - 1)}>← 上一页</button>
+            <button className="btn ghost" disabled={page <= 0} onClick={() => gotoPage(page)}>← 上一页</button>
             <div style={{ textAlign: "center", width: 120 }}>
               第 <strong>{page + 1}</strong> / {meta.num_pages} 页
             </div>
-            <button className="btn ghost" disabled={page >= meta.num_pages - 1} onClick={() => setPage(page + 1)}>下一页 →</button>
+            <button className="btn ghost" disabled={page >= meta.num_pages - 1}
+              onClick={() => gotoPage(page + 2)}>下一页 →</button>
             {meta.toc?.length > 0 && (
               <select onChange={(e) => {
-                const t = meta.toc![Number(e.target.value)]; setPage((t?.page || 1) - 1);
+                const t = meta.toc![Number(e.target.value)];
+                if (t) gotoPage(Math.min(Math.max(t.page || 1, 1), meta.num_pages));
               }} style={{ padding: 6, borderRadius: 6, border: "1px solid var(--line)", marginLeft: 10 }}>
                 <option value="">📑 跳转到章节…</option>
                 {meta.toc.map((t, i) => (
@@ -348,6 +422,7 @@ function Inner() {
                 ))}
               </select>
             )}
+            <span className="chip" style={{ fontSize: 12, marginLeft: 10 }}>↕ 上下滚动连续阅读</span>
           </div>
         </div>
 
@@ -360,56 +435,78 @@ function Inner() {
               onClick={() => { setEvidence(false); setHit(null); }}>清除高亮</button>
           </div>
         )}
-
-        <div className="grid reader-grid" style={{ gap: 16, marginTop: 16 }}>
-          <div onMouseUp={handleSelect}
-            style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: 16,
-            minHeight: 400, lineHeight: 1.7 }}>
-            {pageChunks.map(c => (
-              <div key={c.id} id={`c-${c.id}`}
-                style={{ position: "relative",
-                  marginBottom: 10, borderBottom: "1px dashed var(--line)",
-                  paddingBottom: 10,
-                  background: hit === c.id ? "#fde68a" : undefined,
-                  outline: evidence && hit === c.id ? "2px solid #f59e0b" : undefined,
-                  outlineOffset: evidence && hit === c.id ? 2 : undefined,
-                  borderRadius: 6 }}>
-                {(c.kind === "paragraph" || c.kind === "ocr") && (
-                  <button title="翻译本段" onClick={(ev) => {
-                    ev.stopPropagation();
-                    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-                    openAt(c.text, r.left + 4, r.bottom);
-                  }}
-                    style={{ position: "absolute", right: 0, top: 0, fontSize: 10,
-                      padding: "1px 5px", border: "1px solid var(--line)", borderRadius: 4,
-                      background: "#fff", color: "var(--ink-3)", cursor: "pointer", opacity: 0.6 }}>
-                    译
-                  </button>
-                )}
-                {c.kind === "heading" && <h3 style={{ fontSize: 16, margin: "8px 0 4px" }}>
-                  {c.level >= 1 ? "▶ " : ""}{c.text}</h3>}
-                {c.kind === "table" && <div style={{ background: "#f8fafc", padding: 8, borderRadius: 6,
-                  fontFamily: "ui-monospace, monospace", fontSize: 12,
-                  whiteSpace: "pre-wrap" }}>{c.text}</div>}
-                {c.kind === "formula" && <div style={{ fontFamily: "ui-monospace, monospace",
-                  fontSize: 13, background: "#f8fafc", padding: 6, borderRadius: 6 }}>{c.text}</div>}
-                {c.kind === "caption" && <div style={{ fontStyle: "italic", fontSize: 13, color: "var(--ink-3)" }}>
-                  {c.text}</div>}
-                {c.kind === "paragraph" || c.kind === "ocr" ? <p style={{ margin: 0 }}>{c.text}</p> : null}
-                {lang === "zh" && trans[c.id] && c.kind !== "heading" && c.kind !== "caption" && (
-                  <div style={{ marginTop: 4, color: "var(--ink-3)", fontSize: 13 }}>
-                    🇨🇳 {trans[c.id]}
-                  </div>
-                )}
-              </div>
-            ))}
-            {pageChunks.length === 0 && (
-              <Empty compact icon="🔍" title="本页没有可解析文本"
-                desc={meta.page_flags?.[page + 1] === "needs_ocr"
-                  ? "该页为扫描件，OCR 未产出可用文本，已标记为待识别。"
-                  : "可能是扫描页、空白页或纯图片页。"} />
-            )}
+        {!evidence && hit && (
+          <div className="row" style={{ marginTop: 12, alignItems: "center" }}>
+            <span className="chip" style={{ background: "#fef3c7", borderColor: "#f59e0b" }}>
+              🔍 已定位到匹配段落 · 第 {page + 1} 页
+            </span>
+            <button className="btn ghost" style={{ marginLeft: 10 }}
+              onClick={() => setHit(null)}>清除高亮</button>
           </div>
+        )}
+
+        <div ref={scrollerRef} onScroll={onDocScroll} onMouseUp={handleSelect}
+          className="reader-scroll"
+          style={{ position: "relative", maxHeight: "calc(100vh - 220px)", minHeight: 420,
+            overflowY: "auto", marginTop: 16, background: "#fff",
+            border: "1px solid var(--line)", borderRadius: 10, padding: "8px 16px",
+            lineHeight: 1.7, scrollBehavior: "smooth" }}>
+          {pageGroups.map(({ page: pg, items }) => (
+            <div key={pg} id={`page-${pg}`}
+              ref={(node) => {
+                if (node) pageEls.current.set(pg, node);
+                else pageEls.current.delete(pg);
+              }}>
+              <div style={{ position: "sticky", top: 0, zIndex: 2, background: "#fff",
+                padding: "6px 0 2px", marginBottom: 6, fontSize: 12,
+                color: "var(--ink-3)", borderBottom: "1px solid var(--line)" }}>
+                第 {pg} 页
+              </div>
+              {items.map(c => (
+                <div key={c.id} id={`c-${c.id}`}
+                  style={{ position: "relative",
+                    marginBottom: 10, borderBottom: "1px dashed var(--line)",
+                    paddingBottom: 10,
+                    background: hit === c.id ? "#fde68a" : undefined,
+                    outline: evidence && hit === c.id ? "2px solid #f59e0b" : undefined,
+                    outlineOffset: evidence && hit === c.id ? 2 : undefined,
+                    borderRadius: 6 }}>
+                  {(c.kind === "paragraph" || c.kind === "ocr") && (
+                    <button title="翻译本段" onClick={(ev) => {
+                      ev.stopPropagation();
+                      const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+                      openAt(c.text, r.left + 4, r.bottom);
+                    }}
+                      style={{ position: "absolute", right: 0, top: 0, fontSize: 10,
+                        padding: "1px 5px", border: "1px solid var(--line)", borderRadius: 4,
+                        background: "#fff", color: "var(--ink-3)", cursor: "pointer", opacity: 0.6 }}>
+                      译
+                    </button>
+                  )}
+                  {c.kind === "heading" && <h3 style={{ fontSize: 16, margin: "8px 0 4px" }}>
+                    {c.level >= 1 ? "▶ " : ""}{c.text}</h3>}
+                  {c.kind === "table" && <div style={{ background: "#f8fafc", padding: 8, borderRadius: 6,
+                    fontFamily: "ui-monospace, monospace", fontSize: 12,
+                    whiteSpace: "pre-wrap" }}>{c.text}</div>}
+                  {c.kind === "formula" && <div style={{ fontFamily: "ui-monospace, monospace",
+                    fontSize: 13, background: "#f8fafc", padding: 6, borderRadius: 6 }}>{c.text}</div>}
+                  {c.kind === "caption" && <div style={{ fontStyle: "italic", fontSize: 13, color: "var(--ink-3)" }}>
+                    {c.text}</div>}
+                  {c.kind === "paragraph" || c.kind === "ocr" ? <p style={{ margin: 0 }}>{c.text}</p> : null}
+                  {lang === "zh" && trans[c.id] && c.kind !== "heading" && c.kind !== "caption" && (
+                    <div style={{ marginTop: 4, color: "var(--ink-3)", fontSize: 13 }}>
+                      🇨🇳 {trans[c.id]}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+          {docChunks.length === 0 && (
+            <Empty compact icon="🔍" title="本文没有可解析文本"
+              desc="可能是扫描件或纯图片 PDF；可尝试重新上传，系统会自动启用 OCR。"
+              />
+          )}
         </div>
       </section>
 

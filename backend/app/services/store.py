@@ -148,14 +148,52 @@ def save_paper(parsed: dict, path: str, paper_id: str,
     return pid
 
 
+def _remove_assets(meta: dict | None) -> None:
+    """删除论文对应的 PDF 与封面缩略图（尽力而为，文件不存在就跳过）。"""
+    if not meta:
+        return
+    from pathlib import Path as _P
+    from ..settings import DATA_DIR as _DD
+    targets = [resolve_pdf_path(meta),
+               str(_P(_DD) / "thumbnails" / f"{meta.get('id')}_cover.png")]
+    for f in targets:
+        if not f:
+            continue
+        try:
+            _P(f).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def delete_paper(paper_id: str) -> None:
+    meta = paper_meta(paper_id)
     with get_conn() as conn:
         conn.execute("DELETE FROM papers WHERE id=?", (paper_id,))
         conn.execute("DELETE FROM chunks WHERE paper_id=?", (paper_id,))
         conn.execute("DELETE FROM refs WHERE paper_id=?", (paper_id,))
         conn.execute("DELETE FROM translations WHERE paper_id=?", (paper_id,))
+    _remove_assets(meta)
     bump_version()
     bump_graph_version()
+
+
+def delete_all_papers() -> int:
+    """清空文库：返回删除的论文篇数。"""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM papers").fetchall()
+        metas = []
+        for r in rows:
+            m = dict(r)
+            m["meta"] = loads(m.get("meta"), {})
+            metas.append(m)
+        count = len(metas)
+        for table in ("papers", "chunks", "refs", "translations"):
+            conn.execute(f"DELETE FROM {table}")
+    for m in metas:
+        _remove_assets(m)
+    bump_version()
+    bump_graph_version()
+    return count
 
 
 def paper_meta(paper_id: str) -> dict | None:

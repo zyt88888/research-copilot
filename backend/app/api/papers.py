@@ -266,3 +266,9 @@ def _async_enrich(paper_id: str) -> None:
 def delete(paper_id: str):
     store.delete_paper(paper_id)
     return {"ok": True}
+
+
+@router.delete("")
+def delete_all():
+    """清空文库（含 PDF 与封面文件）。"""
+    return {"ok": True, "deleted": store.delete_all_papers()}
