@@ -125,6 +125,23 @@ def test_diagram_graphviz_and_matplotlib_offline(lib):
     assert "FancyBboxPatch" in py["code"]
 
 
+def test_export_markdown_and_html_with_cached_translation(lib):
+    seed(lib)
+    db.execute("INSERT INTO translations(paper_id,chunk_id,lang,text) VALUES(?,?,?,?)",
+               ("p1", "p1:p1:c0", "zh", "Transformer 用自注意力替代循环。"))
+    from app.api import papers
+
+    md = papers.export_paper("p1", format="md", lang="both")
+    body = md.body.decode("utf-8")
+    assert "Attention Is All You Need" in body
+    assert "Transformer 用自注意力替代循环" in body
+    assert "attachment" in md.headers["content-disposition"]
+
+    html = papers.export_paper("p1", format="html", lang="both").body.decode("utf-8")
+    assert html.startswith("<!doctype html>")
+    assert "Transformer 用自注意力替代循环" in html
+
+
 def test_translate_zh_to_en_offline_never_fakes(lib):
     out = translate.translate_text("本文提出一种基于稀疏注意力的长文档建模方法。", "en")
     assert out["mode"] == "offline"

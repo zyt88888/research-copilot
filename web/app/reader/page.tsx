@@ -52,6 +52,15 @@ function Inner() {
   const [drillJob, setDrillJob] = useState<any>(null);
   const [drillMsg, setDrillMsg] = useState<string | null>(null);
   const [drillBusy, setDrillBusy] = useState(false);
+  // 双向引用跳转 / 左右对照 / 悬停翻译
+  const [refsList, setRefsList] = useState<any[]>([]);
+  const [jumpRef, setJumpRef] = useState<number | null>(null);
+  const [bilingual, setBilingual] = useState(false);
+  const [hoverOn, setHoverOn] = useState(false);
+  const [hoverTip, setHoverTip] = useState<{ x: number; y: number; text: string } | null>(null);
+  const rightScrollerRef = useRef<HTMLDivElement>(null);
+  const syncLock = useRef(false);
+  const hoverReq = useRef<Set<string>>(new Set());
 
   // 连续滚动阅读：容器与各页锚点
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -137,6 +146,7 @@ function Inner() {
     ]).then(([m, c, rf]) => {
       setMeta(m); setChunks(c.chunks || []);
       setRefsTotal((rf.refs || []).length);
+      setRefsList(rf.refs || []);
       const p = Math.min(Math.max(wantPage || 1, 1), m.num_pages || 1);
       setPage(p - 1);
     }).catch(e => setErr(e instanceof Error ? e.message : String(e)));
@@ -357,6 +367,96 @@ function Inner() {
     if (cur - 1 !== page) setPage(cur - 1);
   }
 
+  /** 正文 [n] → 参考文献条目（高亮 2 秒） */
+  function jumpToRef(n: number) {
+    setJumpRef(n);
+    document.getElementById(`ref-${n}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => setJumpRef(null), 2200);
+  }
+
+  /** 参考文献 [n] → 正文首次引用处 */
+  function jumpToCitation(n: number) {
+    const re = new RegExp(`\\[\\s*${n}\\s*(?:[,，\\]–-])`);
+    const ch = docChunks.find(c => re.test(c.text));
+    if (!ch) return;
+    setPage((ch.page || 1) - 1);
+    setHit(ch.id);
+    setTimeout(() => document.getElementById(`c-${ch.id}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" }), 120);
+  }
+
+  /** 把正文中的 [11] / [11,12] / [11–13] 渲染为可点击角标 */
+  function renderCitations(text: string) {
+    const parts = text.split(/(\[\s*\d{1,3}(?:\s*[,–\-]\s*\d{1,3})*\s*\])/g);
+    if (parts.length === 1) return text;
+    return parts.map((part, i) => {
+      const m = part.match(/^\[\s*(\d{1,3}(?:\s*[,–\-]\s*\d{1,3})*)\s*\]$/);
+      if (!m) return <span key={i}>{part}</span>;
+      const nums: number[] = [];
+      for (const seg of m[1].split(",")) {
+        const range = seg.trim().split(/[–-]/).map(x => parseInt(x, 10));
+        if (range.length === 2 && range.every(Number.isFinite) && range[1] - range[0] < 20) {
+          for (let n = range[0]; n <= range[1]; n++) nums.push(n);
+        } else {
+          const n = parseInt(seg.trim(), 10);
+          if (Number.isFinite(n)) nums.push(n);
+        }
+      }
+      const valid = nums.filter(n => n >= 1 && n <= refsList.length);
+      if (!valid.length) return <span key={i}>{part}</span>;
+      return (
+        <span key={i}>
+          {valid.map((n, k) => (
+            <button key={k} onClick={(e) => { e.stopPropagation(); jumpToRef(n); }}
+              title={`跳转到参考文献 [${n}]`}
+              style={{ border: "none", background: "#eef2ff", color: "#4338ca",
+                borderRadius: 3, padding: "0 2px", margin: "0 1px", fontSize: "0.78em",
+                cursor: "pointer", verticalAlign: "super", lineHeight: 1 }}>
+              [{n}]
+            </button>
+          ))}
+        </span>
+      );
+    });
+  }
+
+  /** 左右两栏按滚动比例同步（避免互相触发死循环） */
+  function syncScroll(from: "left" | "right") {
+    if (!bilingual || syncLock.current) return;
+    const a = scrollerRef.current;
+    const b = rightScrollerRef.current;
+    if (!a || !b) return;
+    syncLock.current = true;
+    const src = from === "left" ? a : b;
+    const dst = from === "left" ? b : a;
+    const ratio = src.scrollTop / Math.max(1, src.scrollHeight - src.clientHeight);
+    dst.scrollTop = ratio * Math.max(1, dst.scrollHeight - dst.clientHeight);
+    setTimeout(() => { syncLock.current = false; }, 80);
+  }
+
+  /** 悬停翻译：开启后鼠标停留在段落上即取译文（有缓存则不重复请求） */
+  async function hoverTranslate(c: Chunk, e: React.MouseEvent) {
+    if (!hoverOn || c.kind === "heading") return;
+    const x = Math.max(12, Math.min(e.clientX + 14, window.innerWidth - 372));
+    const y = Math.max(12, Math.min(e.clientY + 14, window.innerHeight - 220));
+    if (trans[c.id]) { setHoverTip({ x, y, text: trans[c.id] }); return; }
+    setHoverTip({ x, y, text: "翻译中…" });
+    if (hoverReq.current.has(c.id)) return;
+    hoverReq.current.add(c.id);
+    try {
+      const r = await fetch(`${apiBase()}/api/translate`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "text", text: c.text, lang: "zh" }),
+      }).then(res => res.json());
+      const text = r.text || r.translation || r.notice || "暂无译文";
+      setTrans(prev => ({ ...prev, [c.id]: text }));
+      setHoverTip(prev => prev ? { ...prev, text } : null);
+    } catch {
+      hoverReq.current.delete(c.id);
+      setHoverTip(prev => prev ? { ...prev, text: "翻译失败：后端不可用" } : null);
+    }
+  }
+
   return (
     <div className="grid">
       <section className="card">
@@ -369,6 +469,16 @@ function Inner() {
           <button className={`btn ghost ${lang === "zh" ? "chip" : ""}`}
             onClick={() => setLang(lang === "zh" ? "en" : "zh")}>
             {lang === "zh" ? "🔄 隐藏中文译文（仅原文）" : "🔄 显示中文译文（双语对照）"}
+          </button>
+          <button className={`btn ghost ${bilingual ? "chip" : ""}`}
+            onClick={() => { setBilingual(v => !v); if (!bilingual) setLang("zh"); }}
+            title="左右两栏对照，拖动任一侧自动同步滚动">
+            {bilingual ? "📖 退出左右对照" : "📖 左右对照 + 同步滚动"}
+          </button>
+          <button className={`btn ghost ${hoverOn ? "chip" : ""}`}
+            onClick={() => { setHoverOn(v => !v); setHoverTip(null); }}
+            title="开启后鼠标停留在段落上即可查看中文译文">
+            💬 悬停翻译
           </button>
           {lang === "zh" && transStatus === "loading" && (
             <span className="chip" style={{ fontSize: 12 }}>⏳ 正在加载译文…</span>
@@ -395,6 +505,40 @@ function Inner() {
             const idx = hit ? found.findIndex(c => c.id === hit) : -1;
             setHit(found[(idx + 1) % found.length].id);
           }}>查找</button>
+
+          {meta.toc && meta.toc.length > 0 && (
+            <details style={{ position: "relative" }}>
+              <summary className="btn ghost" style={{ cursor: "pointer", listStyle: "none" }}>
+                📑 标题树（{meta.toc.length}）
+              </summary>
+              <div style={{ position: "absolute", left: 0, top: "calc(100% + 6px)", zIndex: 25,
+                width: 320, maxHeight: 300, overflowY: "auto", background: "#fff",
+                border: "1px solid var(--line)", borderRadius: 10, padding: 8,
+                boxShadow: "0 12px 32px rgba(15,23,42,.16)" }}>
+                {meta.toc.map((t, i) => (
+                  <div key={i} onClick={() => gotoPage(Math.max(1, t.page || 1))}
+                    style={{ padding: "5px 6px", paddingLeft: 6 + (Math.max(1, t.level || 1) - 1) * 16,
+                      fontSize: 12.5, cursor: "pointer", borderRadius: 6 }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#f1f5f9"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}>
+                    {t.title}
+                    <span style={{ color: "var(--ink-3)", marginLeft: 6, fontSize: 11 }}>
+                      p{t.page}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+          <a className="btn ghost" href={`${apiBase()}/api/papers/${pid}/export?format=md&lang=both`}>
+            ⬇ Markdown
+          </a>
+          <a className="btn ghost" href={`${apiBase()}/api/papers/${pid}/export?format=html&lang=both`}>
+            ⬇ HTML
+          </a>
+          <a className="btn ghost" href={`${apiBase()}/api/papers/${pid}/pdf`}>
+            📄 原版 PDF
+          </a>
         </div>
       </section>
 
@@ -618,10 +762,14 @@ function Inner() {
           </div>
         )}
 
-        <div ref={scrollerRef} onScroll={onDocScroll} onMouseUp={handleSelect}
+        <div style={{ display: bilingual ? "grid" : "block",
+          gridTemplateColumns: bilingual ? "minmax(0,1fr) minmax(0,1fr)" : undefined,
+          gap: 12, marginTop: 16 }}>
+        <div ref={scrollerRef} onScroll={() => { onDocScroll(); syncScroll("left"); }}
+          onMouseUp={handleSelect}
           className="reader-scroll"
           style={{ position: "relative", maxHeight: "calc(100vh - 220px)", minHeight: 420,
-            overflowY: "auto", marginTop: 16, background: "#fff",
+            overflowY: "auto", background: "#fff",
             border: "1px solid var(--line)", borderRadius: 10, padding: "8px 16px",
             lineHeight: 1.7, scrollBehavior: "smooth" }}>
           {pageGroups.map(({ page: pg, items }) => (
@@ -658,14 +806,18 @@ function Inner() {
                   )}
                   {c.kind === "heading" && <h3 style={{ fontSize: 16, margin: "8px 0 4px" }}>
                     {c.level >= 1 ? "▶ " : ""}{c.text}</h3>}
-                  {c.kind === "table" && <div style={{ background: "#f8fafc", padding: 8, borderRadius: 6,
-                    fontFamily: "ui-monospace, monospace", fontSize: 12,
-                    whiteSpace: "pre-wrap" }}>{c.text}</div>}
+                  {c.kind === "table" && <TableBlock text={c.text} />}
                   {c.kind === "formula" && <div style={{ fontFamily: "ui-monospace, monospace",
                     fontSize: 13, background: "#f8fafc", padding: 6, borderRadius: 6 }}>{c.text}</div>}
                   {c.kind === "caption" && <div style={{ fontStyle: "italic", fontSize: 13, color: "var(--ink-3)" }}>
                     {c.text}</div>}
-                  {c.kind === "paragraph" || c.kind === "ocr" ? <p style={{ margin: 0 }}>{c.text}</p> : null}
+                  {(c.kind === "paragraph" || c.kind === "ocr") && (
+                    <p style={{ margin: 0 }}
+                      onMouseEnter={(e) => hoverTranslate(c, e)}
+                      onMouseLeave={() => setHoverTip(null)}>
+                      {renderCitations(c.text)}
+                    </p>
+                  )}
                   {lang === "zh" && trans[c.id] && c.kind !== "heading" && c.kind !== "caption" && (
                     <div style={{ marginTop: 4, color: "var(--ink-3)", fontSize: 13 }}>
                       🇨🇳 {trans[c.id]}
@@ -681,7 +833,84 @@ function Inner() {
               />
           )}
         </div>
+
+          {bilingual && (
+            <div ref={rightScrollerRef} onScroll={() => syncScroll("right")}
+              style={{ maxHeight: "calc(100vh - 220px)", minHeight: 420, overflowY: "auto",
+                background: "#fcfcff", border: "1px solid var(--line)", borderRadius: 10,
+                padding: "8px 16px", lineHeight: 1.8 }}>
+              {pageGroups.map(({ page: pg, items }) => (
+                <div key={pg}>
+                  <div style={{ position: "sticky", top: 0, zIndex: 2, background: "#fcfcff",
+                    padding: "6px 0 2px", marginBottom: 6, fontSize: 12,
+                    color: "var(--ink-3)", borderBottom: "1px solid var(--line)" }}>
+                    第 {pg} 页 · 中文译文
+                  </div>
+                  {items.map(c => (
+                    <div key={c.id} style={{ marginBottom: 10, paddingBottom: 10,
+                      borderBottom: "1px dashed var(--line)",
+                      background: hit === c.id ? "#fef3c7" : undefined, borderRadius: 6 }}>
+                      {c.kind === "heading" ? (
+                        <h3 style={{ fontSize: 15, margin: "6px 0 4px" }}>{c.text}</h3>
+                      ) : (c.kind === "table" || c.kind === "formula") ? (
+                        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                          （表格 / 公式保留原文）
+                        </div>
+                      ) : (
+                        <p style={{ margin: 0, fontSize: 14 }}>
+                          {trans[c.id] || (lang === "zh" ? "译文加载中…" : "已关闭中文译文")}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </section>
+
+      {refsList.length > 0 && (
+        <section className="card">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>📚 参考文献（{refsList.length} 条）</h3>
+            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              点击正文 [n] 跳到此处；点「↩ 正文」回到首次引用位置
+            </span>
+          </div>
+          <div style={{ marginTop: 10, maxHeight: 360, overflowY: "auto",
+            display: "flex", flexDirection: "column", gap: 6 }}>
+            {refsList.map((r, i) => (
+              <div key={r.id ?? i} id={`ref-${i + 1}`}
+                style={{ padding: "7px 10px", border: "1px solid var(--line)",
+                  borderRadius: 8, fontSize: 12.5, lineHeight: 1.6,
+                  background: jumpRef === i + 1 ? "#fef3c7" : "#fff" }}>
+                <div className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+                  <span style={{ flex: "0 0 auto", color: "var(--brand)", fontWeight: 600 }}>
+                    [{i + 1}]
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {r.raw || r.title || "（原始条目缺失）"}
+                  </span>
+                  <button className="btn ghost" style={{ padding: "2px 8px", fontSize: 11 }}
+                    onClick={() => jumpToCitation(i + 1)}>↩ 正文</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {hoverTip && (
+        <div style={{ position: "fixed", left: hoverTip.x, top: hoverTip.y, zIndex: 70,
+          width: 350, maxWidth: "calc(100vw - 24px)", background: "#fff",
+          border: "1px solid var(--line)", borderRadius: 10, padding: 10,
+          boxShadow: "0 12px 32px rgba(15,23,42,.18)",
+          fontSize: 12.5, lineHeight: 1.6, pointerEvents: "none" }}>
+          <div style={{ color: "var(--ink-3)", fontSize: 11, marginBottom: 4 }}>悬停翻译</div>
+          {hoverTip.text}
+        </div>
+      )}
 
       {pick && (
         <div style={{ position: "fixed", left: pick.x, top: pick.y, zIndex: 60, width: pick.w,
@@ -715,6 +944,44 @@ function Inner() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** 把解析出的 Markdown 管表格渲染为原生 HTML 表格；非表格文本退回等宽显示。 */
+function TableBlock({ text }: { text: string }) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const rows = lines
+    .filter(l => !/^\|?[\s:\-|]+\|?$/.test(l))
+    .map(l => l.replace(/^\||\|$/g, "").split("|").map(x => x.trim()));
+  if (rows.length < 2 || rows.some(r => r.length < 2)) {
+    return (
+      <div style={{ background: "#f8fafc", padding: 8, borderRadius: 6,
+        fontFamily: "ui-monospace, monospace", fontSize: 12, whiteSpace: "pre-wrap" }}>
+        {text}
+      </div>
+    );
+  }
+  const [head, ...body] = rows;
+  return (
+    <div style={{ overflowX: "auto", margin: "6px 0" }}>
+      <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}>
+        <thead>
+          <tr>{head.map((h, i) => (
+            <th key={i} style={{ border: "1px solid var(--line)", padding: "5px 7px",
+              background: "#f1f5f9", textAlign: "left" }}>{h}</th>
+          ))}</tr>
+        </thead>
+        <tbody>
+          {body.map((r, ri) => (
+            <tr key={ri}>{r.map((cell, ci) => (
+              <td key={ci} style={{ border: "1px solid var(--line)", padding: "5px 7px" }}>
+                {cell}
+              </td>
+            ))}</tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

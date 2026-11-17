@@ -1,8 +1,10 @@
 """论文 CRUD、解析触发、去重确认、版本比对。"""
 from __future__ import annotations
 
+import html as html_lib
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -12,7 +14,7 @@ from concurrent.futures import TimeoutError as FuturesTimeout
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from ..settings import UPLOAD_DIR
 from ..services import (citation_quality, dedup, drill, jobs, parse_worker,
@@ -100,6 +102,91 @@ def get_paper(paper_id: str):
     if not meta:
         raise HTTPException(status_code=404, detail="paper not found")
     return meta
+
+
+@router.get("/{paper_id}/export")
+def export_paper(paper_id: str, format: str = "md", lang: str = "both"):
+    """整篇导出：Markdown / HTML，可选附加已缓存的逐段中文译文。"""
+    meta = store.paper_meta(paper_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="paper not found")
+    chunks = [c for c in store.chunks_of(paper_id)
+              if c["kind"] in ("heading", "paragraph", "table", "formula", "caption", "ocr")]
+    from ..db import query
+    rows = query("SELECT chunk_id,text FROM translations WHERE paper_id=? AND lang='zh'",
+                 (paper_id,))
+    tx: dict[str, str] = {}
+    for r in rows:
+        cid = r["chunk_id"]
+        tx[cid] = r["text"]
+        tx[cid.split(":", 1)[-1]] = r["text"]
+        tx[cid.split(":")[-1]] = r["text"]
+    with_zh = lang in ("zh", "both")
+
+    title = meta.get("title") or paper_id
+    authors = ", ".join(meta.get("authors") or []) or "Unknown"
+    head = f"{title} — {authors} ({meta.get('year') or 'n.d.'})"
+    if format == "html":
+        esc = html_lib.escape
+        body = [f"<h1>{esc(title)}</h1>",
+                f"<p><em>{esc(authors)} · {esc(str(meta.get('year') or 'n.d.'))}</em></p>"]
+        for c in chunks:
+            text = esc(c["text"])
+            if c["kind"] == "heading":
+                lv = min(max(int(c.get("level") or 2), 2), 4)
+                body.append(f"<h{lv}>{text}</h{lv}>")
+            elif c["kind"] == "formula":
+                body.append(f"<pre class='formula'>{text}</pre>")
+            elif c["kind"] == "table":
+                body.append(f"<pre class='table'>{text}</pre>")
+            else:
+                body.append(f"<p>{text}</p>")
+            if with_zh and tx.get(c["id"]) and c["kind"] != "heading":
+                body.append(f"<blockquote>{esc(tx[c['id']])}</blockquote>")
+        doc = ("<!doctype html><html lang='zh'><meta charset='utf-8'>"
+               f"<title>{esc(title)}</title><style>body{{max-width:860px;margin:40px auto;"
+               "font-family:Georgia,'Songti SC',serif;line-height:1.8;padding:0 16px}"
+               ".formula{{background:#f8fafc;padding:10px;overflow:auto}}"
+               ".table{{background:#f8fafc;padding:10px;overflow:auto;font-size:12px}"
+               "blockquote{{color:#475569;border-left:3px solid #c7d2fe;margin:8px 0;"
+               "padding:2px 12px}}</style><body>" + "\n".join(body) + "</body></html>")
+        return Response(doc, media_type="text/html; charset=utf-8",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="{_safe_name(title)}.html"'})
+
+    lines = [f"# {head}", ""]
+    for c in chunks:
+        text = c["text"]
+        if c["kind"] == "heading":
+            lines += ["#" * 2 + " " + text, ""]
+        elif c["kind"] == "formula":
+            lines += ["$$", text, "$$", ""]
+        else:
+            lines += [text, ""]
+        if with_zh and tx.get(c["id"]) and c["kind"] != "heading":
+            lines += [f"> {tx[c['id']]}", ""]
+    md = "\n".join(lines)
+    return Response(md, media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="{_safe_name(title)}.md"'})
+
+
+def _safe_name(title: str) -> str:
+    name = re.sub(r"[^\w\u4e00-\u9fff.-]+", "_", title).strip("_")
+    return name[:60] or "paper"
+
+
+@router.get("/{paper_id}/pdf")
+def download_original_pdf(paper_id: str):
+    """下载原始 PDF（保持原版式），用于对照阅读与存档。"""
+    meta = store.paper_meta(paper_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="paper not found")
+    path = store.resolve_pdf_path(meta)
+    if not path:
+        raise HTTPException(status_code=404, detail="原 PDF 不存在")
+    return FileResponse(path, media_type="application/pdf",
+                        filename=meta.get("filename") or f"{paper_id}.pdf")
 
 
 @router.get("/{paper_id}/chunks")

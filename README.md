@@ -13,7 +13,7 @@ Lite 版零外部依赖即可启动（无 API Key 自动降级离线模式），
 | PDF 解析 | 双栏还原、字号聚类标题、表格转 MD、公式与图注抽取、参考文献识别 | PyMuPDF + 版面规则，解析结果缓存 |
 | 语义去重 | 同一论文不同版本的自动归并与差异比对 | 64-permutation MinHash + shingle(5)，`DUP_THRESHOLD=0.45`，arXiv 底号强关联 |
 | 抗幻觉 RAG | 检索 → 证据约束作答 → 引用校验 | BM25 + 稠密向量 + RRF；低置信拒答；生成后剔除无依据引用 |
-| 翻译 | 全文/段落翻译，中英对照阅读 | 公式、代码块、URL、`[12]` 引用做占位符保护 |
+| 翻译 | 全文/段落翻译，中英对照阅读（左右双栏 + 同步滚动）、划词/悬停翻译 | 公式、代码块、URL、`[12]` 引用做占位符保护 |
 | 引用图谱 | PageRank 分层（bedrock / frontier / normal）、Future Work 状态判定、一键生成领域综述 | NetworkX DiGraph + 关键词重合度；综述仅用库内元数据，LLM 引用 `[P#]` 逐条校验，离线走抽取式模板 |
 | 学术写作 Copilot | 大纲、Mermaid/TikZ/Graphviz/Matplotlib 图、CSV→图表、中→英学术翻译 | 证据驱动生成，输出附真实参考文献；中→英需在线模型，离线明确提示不伪造译文 |
 | Agent | 规划 → 工具调用 → 观察 → 汇总（SSE 流式） | 16 个工具，最多 6 步，JSON function calling；按「工具+关键参数」语义去重；每次执行落库，可回放 trace |
@@ -25,7 +25,7 @@ Lite 版零外部依赖即可启动（无 API Key 自动降级离线模式），
 | 参考文献下钻 | 按论文名称或参考文献列表自动检索并下载入库 | 引用含金量打分（正文提及 + 语义线索 + 章节位置），默认剔除应付式引用；标题相似度 ≥0.55 才入库；后台任务可查进度 |
 | arXiv 动态追踪 | 从本地库提炼主题 → 定时抓最新论文 → 相关度排序 → 推荐理由 / 点赞踩 | 进程内调度 + SQLite 租约（多 worker 不重复执行）；开源代码优先；`feedback` 表按用户画像重排 |
 
-前端 8 个页面：文库 / 追踪推荐 / 问答 / 阅读器（含划词翻译、证据 bbox 高亮）/ 图谱（力导向交互）/ 写作 Copilot / Agent（执行 + 历史）/ 版本比对。
+前端 8 个页面：文库 / 追踪推荐 / 问答 / 阅读器（划词与悬停翻译、证据 bbox 高亮、正文 [n] ↔ References 双向跳转、左右对照同步滚动、Markdown/HTML/原版 PDF 导出）/ 图谱（力导向交互）/ 写作 Copilot / Agent（执行 + 历史）/ 版本比对。
 统一空态 / 错误态 / 骨架屏组件（`web/components/State.tsx`）；≤768px 移动端适配：导航横向滑动、卡片单列、图谱画布横向拖看、划词浮层宽度自适应。
 
 ---
@@ -131,6 +131,8 @@ Docker 运行时，`docker-compose.yml` 会把 `DATA_DIR=/app/data`、`DB_PATH=/
 | POST | `/api/papers/fetch-arxiv` | 按 arXiv id 下载 PDF 并入库（`exists` / `duplicate` / `ok` 三种状态） |
 | DELETE | `/api/papers/{id}` | 删除论文及其切片、引用 |
 | GET | `/api/papers/{id}/chunks` | 阅读器分页切片（含 bbox） |
+| GET | `/api/papers/{id}/export?format=md\|html&lang=both` | 整篇导出 Markdown / HTML，可附加已缓存中文译文 |
+| GET | `/api/papers/{id}/pdf` | 下载原始 PDF（保持原版式） |
 | POST | `/api/chat` | RAG 问答（返回 sources / 置信度 / mode；`hierarchical=true` 走长文档分层检索；问「图 N」自动走图表理解通道） |
 | GET | `/api/figures/{paper_id}/{n}?q=` | 定位第 N 张图：图注 + 裁剪原图 + 图内 OCR 文字 |
 | GET | `/api/figures/img/{name}` | 图表裁剪产物（文件名白名单校验） |
