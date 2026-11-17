@@ -14,7 +14,7 @@ type FutureItem = {
   text: string; status: string; resolved_by?: { id: string; title: string } | null;
 };
 
-const W = 1080;
+const W = 1080; // 首帧未测量时的兜底画布尺寸
 const H = 620;
 
 export default function GraphPage() {
@@ -31,6 +31,23 @@ export default function GraphPage() {
   const [query, setQuery] = useState("");
   const [view, setView] = useState({ k: 1, x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  // 画布实际尺寸：让 viewBox 与容器同尺寸，1 单位 = 1 CSS 像素，
+  // 避免等比缩放把节点和文字整体缩小（1440 宽下节点看起来过小）
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      setBox(prev => (Math.abs(prev.w - r.width) < 2 && Math.abs(prev.h - r.height) < 2)
+        ? prev : { w: r.width, h: r.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [nodes.length]);
+  const VW = Math.max(320, Math.round(box.w) || W);
+  const VH = Math.max(240, Math.round(box.h) || H);
 
   async function load() {
     setLoading(true); setErr(null);
@@ -52,7 +69,7 @@ export default function GraphPage() {
 
   useEffect(() => { load(); }, []);
 
-  const positions = useMemo(() => layoutForce(nodes, links), [nodes, links]);
+  const positions = useMemo(() => layoutForce(nodes, links, VW, VH), [nodes, links, VW, VH]);
   const byId = useMemo(() => Object.fromEntries(nodes.map(n => [n.id, n])), [nodes]);
 
   const visible = (n: Node) => !hidden[n.role];
@@ -83,7 +100,7 @@ export default function GraphPage() {
     return !!q && ((n.title || n.label || "").toLowerCase().includes(q));
   }
 
-  const zoom = (factor: number, cx = W / 2, cy = H / 2) => {
+  const zoom = (factor: number, cx = VW / 2, cy = VH / 2) => {
     setView(v => {
       const k = Math.max(0.5, Math.min(3, v.k * factor));
       const ratio = k / v.k;
@@ -91,11 +108,17 @@ export default function GraphPage() {
     });
   };
 
+  // 标签错行：按 x 排序后奇偶两行交替，减少密集区域的文字互相压盖
+  const labelRow: Record<string, number> = {};
+  [...visNodes].filter(labelVisible)
+    .sort((a, b) => (positions[a.id]?.x ?? 0) - (positions[b.id]?.x ?? 0))
+    .forEach((n, i) => { labelRow[n.id] = i % 2; });
+
   const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
-    const cx = ((e.clientX - rect.left) / rect.width) * W;
-    const cy = ((e.clientY - rect.top) / rect.height) * H;
+    const cx = ((e.clientX - rect.left) / rect.width) * VW;
+    const cy = ((e.clientY - rect.top) / rect.height) * VH;
     zoom(e.deltaY < 0 ? 1.12 : 1 / 1.12, cx, cy);
   };
 
@@ -165,8 +188,8 @@ export default function GraphPage() {
         ) : (
         <>
         <div className="graph-fill">
-        <div className="graph-scroll">
-        <svg width="100%" viewBox={`0 0 ${W} ${H}`}
+        <div className="graph-scroll" ref={wrapRef}>
+        <svg width="100%" viewBox={`0 0 ${VW} ${VH}`}
           style={{ marginTop: 12, border: "1px solid var(--line)", borderRadius: 10,
             background: "#fcfcfd", cursor: drag.current ? "grabbing" : "grab", touchAction: "none" }}
           onWheel={onWheel} onPointerDown={startDrag} onPointerMove={onDrag}
@@ -204,7 +227,7 @@ export default function GraphPage() {
               if (!p) return null;
               const color = n.role === "bedrock" ? "#f59e0b"
                 : n.role === "frontier" ? "#10b981" : "#6366f1";
-              const r = Math.max(5, Math.min(24, n.size * 0.42));
+              const r = Math.max(6, Math.min(19, n.size * 0.36));
               const dim = isDim(n.id);
               return (
                 <g key={n.id} opacity={dim ? 0.25 : 1}
@@ -221,11 +244,12 @@ export default function GraphPage() {
                     <circle cx={p.x} cy={p.y} r={r} fill={color} fillOpacity={0.85} />
                   )}
                   {labelVisible(n) && (
-                    <text x={p.x + r + 4} y={p.y + 4} fontSize={11}
+                    <text x={p.x + r + 4} y={p.y + (labelRow[n.id] === 1 ? -r - 5 : r + 12)}
+                      fontSize={11.5}
                       fill={queryMatch(n) ? "#b45309" : "#334155"}
                       fontWeight={n.role === "bedrock" ? 600 : 400}
                       style={{ pointerEvents: "none" }}>
-                      {(n.label || n.title || "").slice(0, 18)}{n.year ? ` · ${n.year}` : ""}
+                      {(n.label || n.title || "").slice(0, 14)}{n.year ? ` · ${n.year}` : ""}
                     </text>
                   )}
                 </g>
@@ -338,10 +362,10 @@ function seeded(i: number) {
 function prCut(nodes: Node[]) {
   if (!nodes.length) return 0;
   const arr = nodes.map(n => n.pagerank).sort((a, b) => b - a);
-  return arr[Math.min(arr.length - 1, Math.floor(arr.length * 0.45))];
+  return arr[Math.min(arr.length - 1, Math.floor(arr.length * 0.3))];
 }
 
-function layoutForce(nodes: Node[], links: Link[]) {
+function layoutForce(nodes: Node[], links: Link[], W: number, H: number) {
   const n = Math.max(nodes.length, 1);
   const k = Math.sqrt((W * H) / n) * 1.15;
   const pos: Record<string, { x: number; y: number }> = {};
@@ -397,19 +421,19 @@ function layoutForce(nodes: Node[], links: Link[]) {
     temp = Math.max(0.6, temp * 0.965);
   }
 
-  // 自适应铺满画布：按包围盒等比缩放，避免节点全挤在中心
+  // 自适应铺满画布：横纵分别缩放，避免被容器高度限制导致整体缩在中间
   const vals = Object.values(pos);
   const x0 = Math.min(...vals.map(p => p.x)), x1 = Math.max(...vals.map(p => p.x));
   const y0 = Math.min(...vals.map(p => p.y)), y1 = Math.max(...vals.map(p => p.y));
   const spanX = Math.max(1, x1 - x0), spanY = Math.max(1, y1 - y0);
-  const scale = Math.min(6, Math.min((W - 180) / spanX, (H - 140) / spanY));
+  const sx = Math.min(6, (W - 200) / spanX), sy = Math.min(6, (H - 110) / spanY);
   for (const p of vals) {
-    p.x = W / 2 + (p.x - (x0 + x1) / 2) * scale;
-    p.y = H / 2 + (p.y - (y0 + y1) / 2) * scale;
+    p.x = W / 2 + (p.x - (x0 + x1) / 2) * sx;
+    p.y = H / 2 + (p.y - (y0 + y1) / 2) * sy;
   }
 
   // 重叠消解：距离过近的节点对按半径推开
-  const minGap = Math.min(120, Math.max(26, (W * H) / (n * 340)));
+  const minGap = Math.min(140, Math.max(40, (W * H) / (n * 260)));
   for (let pass = 0; pass < 40; pass++) {
     let moved = false;
     for (let i = 0; i < nodes.length; i++) {
