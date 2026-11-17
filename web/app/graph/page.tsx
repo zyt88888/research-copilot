@@ -269,35 +269,39 @@ export default function GraphPage() {
           </div>
         )}
 
-        <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 6 }}>
-            论文列表（按 PageRank 排序，点击即选中节点）
-          </div>
-          <div className="graph-list" style={{ border: "1px solid var(--line)", borderRadius: 8 }}>
-            {nodes.filter(visible).map((n, idx) => (
-              <div key={n.id}
-                onClick={() => { setSelected(n.id); setHover(n.id); }}
-                style={{ padding: "7px 10px", fontSize: 13, cursor: "pointer",
-                  borderBottom: "1px solid var(--line)",
-                  background: selected === n.id ? "#fef3c7" : "transparent",
-                  display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ color: "var(--ink-3)", width: 22, flex: "0 0 auto" }}>{idx + 1}</span>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", flex: "0 0 auto",
-                  background: n.role === "bedrock" ? "#f59e0b"
-                    : n.role === "frontier" ? "#10b981" : "#6366f1" }} />
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {n.label || n.title}
-                </span>
-                <span style={{ color: "var(--ink-3)", fontSize: 12 }}>
-                  {n.year || ""} · PR {n.pagerank}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
         </>
         )}
       </section>
+
+      <div className="graph-bottom">
+        {nodes.length > 0 && (
+          <section className="card graph-list-card">
+            <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 6 }}>
+              论文列表（按 PageRank 排序，点击即选中节点）
+            </div>
+            <div className="graph-list" style={{ border: "1px solid var(--line)", borderRadius: 8 }}>
+              {nodes.filter(visible).map((n, idx) => (
+                <div key={n.id}
+                  onClick={() => { setSelected(n.id); setHover(n.id); }}
+                  style={{ padding: "7px 10px", fontSize: 13, cursor: "pointer",
+                    borderBottom: "1px solid var(--line)",
+                    background: selected === n.id ? "#fef3c7" : "transparent",
+                    display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ color: "var(--ink-3)", width: 22, flex: "0 0 auto" }}>{idx + 1}</span>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", flex: "0 0 auto",
+                    background: n.role === "bedrock" ? "#f59e0b"
+                      : n.role === "frontier" ? "#10b981" : "#6366f1" }} />
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {n.label || n.title}
+                  </span>
+                  <span style={{ color: "var(--ink-3)", fontSize: 12 }}>
+                    {n.year || ""} · PR {n.pagerank}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
       {future && (
         <section className="card graph-side">
@@ -320,6 +324,7 @@ export default function GraphPage() {
           </div>
         </section>
       )}
+      </div>
     </div>
   );
 }

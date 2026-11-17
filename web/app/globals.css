@@ -457,29 +457,38 @@ table.compare tr:hover td { background: #fafbff; }
   flex: 1; min-height: 0; max-height: none;
 }
 
-/* ========== 引用图谱页：整屏自适应布局 ========== */
+/* ========== 引用图谱页：居中单列，与版本比对页一致 ========== */
 .graph-page {
-  display: grid; grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 18px; height: calc(100vh - 120px); align-items: stretch;
+  display: flex; flex-direction: column; gap: 18px;
+  max-width: 1100px; margin: 0 auto;
+  height: calc(100vh - 120px);
 }
 .graph-page > .card {
   margin-bottom: 0; min-height: 0;
   display: flex; flex-direction: column;
 }
-.graph-card { position: relative; overflow: hidden; }
+.graph-card { position: relative; overflow: hidden; flex: 1 1 auto; }
 .graph-fill { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .graph-scroll { flex: 1 1 auto; min-height: 0; display: flex; }
 .graph-scroll > svg { height: 100%; width: 100%; }
-.graph-list { flex: 0 0 auto; max-height: 180px; overflow-y: auto; }
-.graph-side { overflow-y: auto; }
+/* 图谱下方：论文列表与前沿 Idea 并排，共用一条高度 */
+.graph-bottom { flex: 0 0 auto; height: 210px; display: flex; gap: 18px; }
+.graph-bottom > .card {
+  flex: 1 1 0; min-width: 0; min-height: 0; margin-bottom: 0;
+  display: flex; flex-direction: column;
+}
+.graph-list { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; }
+.graph-side > div { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .graph-detail {
   position: absolute; right: 16px; bottom: 16px; width: 330px;
   z-index: 5; margin: 0; box-shadow: var(--shadow-md);
 }
 @media (max-width: 1100px) {
-  .graph-page { grid-template-columns: 1fr; height: auto; }
+  .graph-page { height: auto; }
   .graph-scroll > svg { height: auto; }
-  .graph-list { max-height: 240px; }
+  .graph-bottom { height: auto; flex-direction: column; }
+  .graph-list { max-height: 240px; flex: none; }
+  .graph-side { max-height: 320px; }
   .graph-detail { position: static; width: auto; }
 }
 
