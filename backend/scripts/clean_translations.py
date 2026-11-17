@@ -38,9 +38,11 @@ def main(dry_run: bool = False) -> None:
     bad = []
     for r in rows:
         src = _source(chunks, r["paper_id"], r["chunk_id"])
-        if nmt.is_degenerate(src, r["text"] or "") or nmt.looks_like_name_list(src):
+        # 只清理重复循环/长度异常的垃圾输出；人名列表型段落现在会给出名单前正文的
+        # 正常译文，不能再按「像名单」一刀切删除，否则好译文会被反复删重建。
+        if nmt.is_degenerate(src, r["text"] or ""):
             bad.append(r)
-    print(f"中文译文共 {len(rows)} 条，检测到退化/人名列表 {len(bad)} 条")
+    print(f"中文译文共 {len(rows)} 条，检测到退化 {len(bad)} 条")
     if dry_run or not bad:
         return
 
