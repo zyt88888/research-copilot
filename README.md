@@ -340,7 +340,7 @@ flowchart TD
 |---|---|
 | repo | `backend/` + `web/` + Dockerfile + docker-compose + 测试与脚本 |
 | 自主探索 | arXiv / Semantic Scholar 双源检索与一键入库、定期抓取最新投稿、Python 沙箱、GitHub 复现性与相关推荐、图表理解（README §6.2–6.6） |
-| data | 演示库 `data/app.db`（23 篇：20 篇核心论文 + 1 份扫描件 + 1 组版本对，8523 切片 / 1184 参考文献 / 717 条中文译文）+ `uploads/` PDF |
+| data | 演示库 `data/app.db`（23 篇：20 篇核心论文 + 1 份扫描件 + 1 组版本对，8527 切片 / 1139 参考文献 / 763 条中文译文）+ `uploads/` PDF |
 | README | 本文件（功能、启动、API、评测、架构图、局限） |
 | 评测报告 | `AGENT_BENCHMARK.md`（10 任务成功率 10/10） |
 | 评分映射 | `docs/评分映射.md`（能力 → 页面 → 接口 → 代码 → 截图，含实测指标与已知不足） |
