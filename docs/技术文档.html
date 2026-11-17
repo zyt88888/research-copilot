@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>科研小助手 Agent · 技术文档</title>
+<style>
+  :root{
+    --ink:#1f2937; --muted:#5b6675; --line:#dfe4ea; --bg:#f6f8fb;
+    --brand:#1d4ed8; --brand2:#0f766e; --accent:#b45309; --red:#b91c1c; --purple:#6d28d9;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#e9edf3;color:var(--ink);
+    font-family:"Microsoft YaHei","PingFang SC","Source Han Sans SC",sans-serif;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  body{font-size:9.6pt;line-height:1.65}
+  .sheet{width:210mm;min-height:297mm;margin:0 auto 8mm;background:#fff;padding:16mm 15mm 14mm;
+    position:relative;box-shadow:0 2px 14px rgba(15,23,42,.10);overflow:hidden;}
+  .sheet:last-child{margin-bottom:0}
+  .foot{position:absolute;left:15mm;right:15mm;bottom:7mm;display:flex;justify-content:space-between;
+    font-size:7.6pt;color:#94a3b8;border-top:1px solid #eef2f7;padding-top:3mm}
+  h1{font-size:19pt;line-height:1.3;margin:0 0 4mm;color:#0f172a;letter-spacing:.2px}
+  h2{font-size:13.5pt;margin:0 0 3mm;padding-left:3mm;border-left:4px solid var(--brand);color:#0f172a}
+  h3{font-size:10.8pt;margin:5mm 0 2mm;color:#0f172a}
+  h4{font-size:9.8pt;margin:3.5mm 0 1.5mm;color:#111827}
+  p{margin:0 0 2.4mm}
+  ul,ol{margin:0 0 2.6mm;padding-left:5mm}
+  li{margin-bottom:1.1mm}
+  .lead{font-size:10.4pt;line-height:1.75;color:#334155}
+  .muted{color:var(--muted)}
+  .small{font-size:8.4pt;color:var(--muted)}
+  .foot .no{font-family:Consolas,monospace}
+  .chip{display:inline-block;padding:1mm 2.4mm;border-radius:99px;font-size:7.8pt;font-weight:700;
+    color:#fff;background:var(--brand);letter-spacing:.3px;vertical-align:middle}
+  .chip.green{background:var(--brand2)} .chip.orange{background:var(--accent)}
+  .chip.red{background:var(--red)} .chip.purple{background:var(--purple)}
+  .tag{display:inline-block;font-size:7.4pt;font-weight:700;padding:.6mm 1.8mm;border-radius:3px;
+    margin-right:1.6mm;vertical-align:1px}
+  .tag.ai{background:#dbeafe;color:#1e40af} .tag.int{background:#ffedd5;color:#9a3412}
+  .tag.opt{background:#dcfce7;color:#166534} .tag.innov{background:#fee2e2;color:#991b1b}
+  .tag.proof{background:#ede9fe;color:#5b21b6} .tag.ux{background:#f1f5f9;color:#334155}
+  .callout{border:1px solid var(--line);border-left:4px solid var(--brand);background:#f8fafc;
+    border-radius:4px;padding:3mm 3.6mm;margin:3mm 0;font-size:9.1pt}
+  .callout.ai{border-left-color:#2563eb;background:#eff6ff}
+  .callout.int{border-left-color:#ea580c;background:#fff7ed}
+  .callout.opt{border-left-color:#16a34a;background:#f0fdf4}
+  .callout.innov{border-left-color:#dc2626;background:#fef2f2}
+  .callout.proof{border-left-color:#7c3aed;background:#f5f3ff}
+  .callout b{color:#0f172a}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;margin:4mm 0}
+  .kpi{border:1px solid var(--line);border-radius:6px;padding:3mm;text-align:center;background:linear-gradient(180deg,#fff,#f8fafc)}
+  .kpi .n{font-size:16pt;font-weight:800;color:var(--brand);line-height:1.2}
+  .kpi .l{font-size:7.8pt;color:var(--muted)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:4mm}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}
+  .card{border:1px solid var(--line);border-radius:6px;padding:3mm 3.4mm;background:#fff}
+  .card h4{margin:0 0 1.5mm;font-size:9.6pt}
+  .card p{font-size:8.7pt;color:#475569;margin:0}
+  .figure{border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#f8fafc;margin:2mm 0}
+  .figure img{display:block;width:100%;height:auto}
+  .figure .cap{font-size:7.8pt;color:var(--muted);padding:1.5mm 2.4mm;border-top:1px solid #eef2f7;background:#fff}
+  table.tbl{width:100%;border-collapse:collapse;font-size:8.5pt;margin:2.5mm 0}
+  table.tbl th{background:#f1f5f9;color:#0f172a;text-align:left;font-weight:700;
+    border:1px solid var(--line);padding:1.6mm 2mm}
+  table.tbl td{border:1px solid var(--line);padding:1.6mm 2mm;vertical-align:top}
+  table.tbl tr:nth-child(even) td{background:#fcfdff}
+  table.tbl .em{color:var(--brand);font-weight:700}
+  .toc{list-style:none;padding:0;margin:3mm 0}
+  .toc li{display:flex;align-items:baseline;gap:2mm;padding:1.6mm 0;border-bottom:1px dashed #e5e7eb;font-size:9.4pt}
+  .toc .n{width:10mm;color:var(--brand);font-weight:800;font-family:Consolas,monospace}
+  .toc .t{flex:1}
+  .toc .d{color:#94a3b8;font-size:8.2pt}
+  .cover{background:linear-gradient(145deg,#0b1220 0%,#12224a 55%,#0f3b52 100%);color:#fff;padding:22mm 18mm}
+  .cover .badge{display:inline-block;border:1px solid rgba(255,255,255,.35);border-radius:99px;
+    padding:1.4mm 3.4mm;font-size:8.4pt;letter-spacing:1px;color:#c7d2fe}
+  .cover h1{color:#fff;font-size:30pt;line-height:1.22;margin:7mm 0 3mm;letter-spacing:.5px}
+  .cover .sub{font-size:12.5pt;color:#cbd5e1;line-height:1.6;margin-bottom:8mm}
+  .cover .meta{font-size:9pt;color:#94a3b8;line-height:2}
+  .cover .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;margin:9mm 0 0}
+  .cover .stat{border:1px solid rgba(255,255,255,.18);border-radius:6px;padding:3mm;background:rgba(255,255,255,.05)}
+  .cover .stat .n{font-size:17pt;font-weight:800;color:#fff}
+  .cover .stat .l{font-size:7.6pt;color:#94a3b8}
+  .cover .hero{margin-top:8mm;border:1px solid rgba(255,255,255,.18);border-radius:6px;overflow:hidden}
+  .cover .hero img{display:block;width:100%}
+  .callout .label{font-weight:800;margin-right:1.5mm}
+  .two-col{column-count:2;column-gap:6mm}
+  .two-col h4{break-after:avoid}
+  .avoid{break-inside:avoid;page-break-inside:avoid}
+  .arch{width:100%;height:auto}
+  .kv{display:grid;grid-template-columns:26mm 1fr;gap:1.2mm 3mm;font-size:8.8pt}
+  .kv .k{color:var(--muted)}
+  .bignum{font-size:12pt;font-weight:800;color:var(--brand)}
+  .divider{height:1px;background:var(--line);margin:3.5mm 0}
+  .note{font-size:8.2pt;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:4px;padding:2.2mm 3mm}
+  @media print{
+    @page{size:A4;margin:0}
+    body{background:#fff}
+    .sheet{margin:0;box-shadow:none;width:210mm;min-height:297mm;page-break-after:always}
+    .sheet:last-child{page-break-after:auto}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= P1 封面 ================= -->
+<section class="sheet cover">
+  <span class="badge">全国高校 AI 大模型挑战赛 · 参赛作品</span>
+  <h1>科研小助手 Agent<br><span style="font-size:16pt;color:#93c5fd;font-weight:600">Research Copilot</span></h1>
+  <div class="sub">面向科研 PDF 全流程的多模态解析、可追溯 RAG 与可审计 Agent</div>
+  <div class="meta">
+    文档版本：v1.0 &nbsp;|&nbsp; 日期：2026 年 11 月<br>
+    参赛队伍：<b style="color:#fbbf24">（提交前填写队名/成员/学校）</b><br>
+    代码仓库：github.com/zyt88888/research-copilot &nbsp;|&nbsp; 演示视频：（录制后补链接）<br>
+    在线演示：（部署后补公网地址） &nbsp;|&nbsp; 联系方式：（填写）
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="n">23</div><div class="l">演示库论文</div></div>
+    <div class="stat"><div class="n">8,527</div><div class="l">结构化切片</div></div>
+    <div class="stat"><div class="n">107</div><div class="l">自动化测试通过</div></div>
+    <div class="stat"><div class="n">6+1</div><div class="l">赛题模块 + Agent</div></div>
+  </div>
+  <div class="hero"><img src="screenshots/01-library.png" alt="文库页"></div>
+</section>
+
+<!-- ================= P2 目录 ================= -->
+<section class="sheet">
+  <h2>目录</h2>
+  <ul class="toc">
+    <li><span class="n">01</span><span class="t">项目概述</span><span class="d">背景 / 定位 / 提交信息速览</span></li>
+    <li><span class="n">02</span><span class="t">需求分析</span><span class="d">赛题六模块映射 / 用户场景 / 非功能需求</span></li>
+    <li><span class="n">03</span><span class="t">系统架构设计</span><span class="d">总体架构 / 数据模型 / 关键链路 / 部署拓扑</span></li>
+    <li><span class="n">04</span><span class="t">AI 技术方案</span><span class="d">选型理由 / 集成方式 / 优化策略 / 抗幻觉</span></li>
+    <li><span class="n">05</span><span class="t">核心功能实现</span><span class="d">模块一至六 + Agent 闭环（逐模块截图）</span></li>
+    <li><span class="n">06</span><span class="t">测试与部署</span><span class="d">测试体系 / 实测指标 / Docker 部署 / 安全合规</span></li>
+    <li><span class="n">07</span><span class="t">创新点</span><span class="d">技术创新点 T1–T7 / 应用创新点 A1–A7</span></li>
+    <li><span class="n">08</span><span class="t">总结与展望</span><span class="d">成果 / 局限 / 后续计划</span></li>
+    <li><span class="n">附</span><span class="t">附录</span><span class="d">API 摘要 / 环境变量 / 截图索引</span></li>
+  </ul>
+  <div class="callout ai" style="margin-top:8mm">
+    <span class="label">阅读提示</span>第 4 章与第 7 章是赛题明确要求「重点阐述」的部分：AI 选型理由、集成方式、优化策略，以及技术创新点与应用创新点。文中用
+    <span class="tag ai">AI 选型</span><span class="tag int">集成</span><span class="tag opt">优化</span><span class="tag innov">创新</span><span class="tag proof">实测</span>
+    逐处标注，便于评审快速定位。
+  </div>
+  <div class="grid2" style="margin-top:6mm">
+    <div class="card"><h4>文档范围</h4><p>覆盖赛题 2.1 材料要求中的项目介绍、技术架构、安装运行、环境配置、测试与部署；技术文档 2.3 要求的全部章节。</p></div>
+    <div class="card"><h4>数据口径</h4><p>所有数字来自演示库实时接口与 pytest 结果，未使用估算值；截图均来自本机运行实例。</p></div>
+  </div>
+  <div class="foot"><span>科研小助手 Agent · 技术文档</span><span class="no">Research Copilot v1.0</span></div>
+</section>
+
+<!-- ================= P3 项目概述 ================= -->
+<section class="sheet">
+  <h2>01 项目概述</h2>
+  <h3>1.1 背景：科研阅读的三道坎</h3>
+  <p class="lead">科研人员的日常不是「读一篇论文」，而是同时管理几十上百篇 PDF：找版本、读公式、找引用、写综述、复现实验。通用大模型能回答问题，却有三个硬伤：<b>看不到版面结构</b>、<b>引用无法追溯</b>、<b>离线不可用</b>。</p>
+  <div class="grid3">
+    <div class="card"><h4>结构丢失</h4><p>直接抽文本会打乱双栏顺序，标题、表格、公式、图注混成一段，后续检索与阅读都失真。</p></div>
+    <div class="card"><h4>引用幻觉</h4><p>模型会编造不存在的参考文献与页码，评审与科研写作都无法接受。</p></div>
+    <div class="card"><h4>环境依赖</h4><p>向量库、OCR、模型网关任何一环缺失，演示就中断，无法稳定交付。</p></div>
+  </div>
+  <h3>1.2 项目定位：不是聊天壳，而是文档驱动的科研工作流</h3>
+  <p>系统把「解析 → 管理 → 检索 → 问答 → 翻译 → 引用分析 → 综述 → 写作 → Agent」做成一条可追溯的流水线。所有结论都落到<b>论文 + 页码 + bbox</b>的结构化切片上，模型只负责在证据范围内组织语言。</p>
+  <div class="callout proof"><span class="label">实测规模</span>演示库 23 篇论文、8,527 个结构化切片、1,139 条参考文献、796 条已缓存中文译文；图谱 23 节点 / 42 条引用边；自动化测试 107 通过、4 跳过。</div>
+  <h3>1.3 提交信息速览</h3>
+  <table class="tbl">
+    <tr><th style="width:24%">提交项</th><th>内容</th><th style="width:22%">状态</th></tr>
+    <tr><td>代码仓库</td><td>GitHub Public：<span class="em">github.com/zyt88888/research-copilot</span>，53+ 次提交</td><td>已就绪，需确认 Public</td></tr>
+    <tr><td>README</td><td>项目介绍、架构、安装运行、API、评测、局限、团队信息</td><td>已就绪</td></tr>
+    <tr><td>环境配置</td><td><code>backend/.env.example</code> + <code>requirements.txt</code> + <code>package.json</code></td><td>已就绪，Key 不入库</td></tr>
+    <tr><td>演示数据</td><td><code>data/app.db</code> + 24 个 PDF（含扫描件、版本对）</td><td>随仓库提供</td></tr>
+    <tr><td>演示视频</td><td>5–8 分钟、1080p、MP4，按《演示脚本_8分钟录屏.md》录制</td><td><b style="color:#b91c1c">待录制</b></td></tr>
+    <tr><td>技术文档</td><td>本 PDF，≤30 页，图文并茂</td><td>已生成</td></tr>
+    <tr><td>在线演示</td><td>公网可访问地址，评审期保持可用</td><td><b style="color:#b91c1c">待部署</b></td></tr>
+  </table>
+  <div class="note">说明：视频与在线地址属于提交前必须补齐的两项，代码、文档、数据、测试均已就绪。仓库中的 <code>backend/.env</code> 不含任何真实 Key，正式部署通过环境变量注入。</div>
+  <div class="foot"><span>01 项目概述</span><span class="no">P3</span></div>
+</section>
+
+<!-- ================= P4 需求分析 1 ================= -->
+<section class="sheet">
+  <h2>02 需求分析</h2>
+  <h3>2.1 赛题六模块与实现映射</h3>
+  <table class="tbl">
+    <tr><th style="width:17%">赛题模块</th><th style="width:37%">关键要求</th><th>本项目实现</th><th style="width:15%">入口 / 章节</th></tr>
+    <tr>
+      <td><b>模块一</b><br>PDF 管理与多模态解析</td>
+      <td>单篇/批量上传；基于内容的语义去重与版本建议；扫描件 OCR；长篇书籍；标题、作者与机构、摘要、标题树、表格、图、公式、参考文献、附录</td>
+      <td>多选/拖拽批量上传 + MinHash 语义去重；PyMuPDF 版式重建 + PaddleOCR；标题树、表格转 MD、公式/图注分块；首页作者区机构抽取；图表 bbox 裁切内联</td>
+      <td>文库 / 阅读器<br>§5.1</td>
+    </tr>
+    <tr>
+      <td><b>模块二</b><br>RAG 精准问答与跨文献对比</td>
+      <td>基于库内文献精准回答；答案可溯源；多篇跨文献对比</td>
+      <td>BM25 + 384 维稠密向量 + RRF；中文问题改写英文检索；证据卡带页码/bbox；生成后引用校验；低置信拒答；多论文分维度对比</td>
+      <td>问答 / 版本比对<br>§5.2</td>
+    </tr>
+    <tr>
+      <td><b>模块三</b><br>版式阅读与中英对照</td>
+      <td>保留版式阅读；双向引用跳转；中英对照同步滚动；翻译；导出</td>
+      <td>阅读器按页还原；正文 [n] ↔ References 双向跳转；左右双栏按比例同步滚动；悬停/划词翻译；Markdown/HTML/原版 PDF 导出</td>
+      <td>阅读器<br>§5.3</td>
+    </tr>
+    <tr>
+      <td><b>模块四</b><br>参考文献价值与追踪</td>
+      <td>参考文献含金量；下钻；arXiv 追踪；反馈</td>
+      <td>正文提及 + 语义线索 + 章节位置加权打分；四档分级；按分数下钻入库；arXiv 主题追踪 + 点赞踩重排</td>
+      <td>阅读器 / 追踪推荐<br>§5.4</td>
+    </tr>
+    <tr>
+      <td><b>模块五</b><br>引用图谱与领域综述</td>
+      <td>引用关系可视化；领域综述自动生成</td>
+      <td>PageRank 三层角色 + 版本虚线；Future Work 抽取与 open/resolved；综述只用库内真实元数据，[P#] 逐条校验</td>
+      <td>引用图谱<br>§5.5</td>
+    </tr>
+    <tr>
+      <td><b>模块六</b><br>写作 Copilot</td>
+      <td>论文框架；图表生成；CSV 转图；学术英译</td>
+      <td>7 章节框架 + 真实参考文献；Mermaid / TikZ / Graphviz / Matplotlib；CSV→图；中→英占位符保护</td>
+      <td>Copilot<br>§5.6</td>
+    </tr>
+    <tr>
+      <td><b>综合</b><br>Agent 闭环</td>
+      <td>自主规划、工具调用、闭环探索</td>
+      <td>16 个工具；规划→调用→观察→再规划→汇总；SSE 事件流；执行历史可回放；工具调用语义去重</td>
+      <td>Agent<br>§5.7</td>
+    </tr>
+  </table>
+  <div class="callout"><span class="label">评审看点</span>表中每一行都能在系统里真实操作，不存在「只写文档、没有入口」的功能；每个模块至少有一个独立页面与一组 API。</div>
+  <div class="foot"><span>02 需求分析</span><span class="no">P4</span></div>
+</section>
+
+<!-- ================= P5 需求分析 2 ================= -->
+<section class="sheet">
+  <h3>2.2 用户角色与典型场景</h3>
+  <table class="tbl">
+    <tr><th style="width:18%">角色</th><th style="width:30%">核心诉求</th><th>系统响应</th></tr>
+    <tr><td>研究生（开题/综述）</td><td>快速摸清一个领域的脉络与开放问题</td><td>引用图谱看基石/前沿 → Future Work 找 open 项 → 一键生成领域综述（引用可核验）</td></tr>
+    <tr><td>研究生（精读）</td><td>读懂长文、公式、图表，跨语言阅读</td><td>版式阅读 + 标题树 + 表格原生渲染 + 图内联 + 左右对照翻译 + 划词/悬停翻译</td></tr>
+    <tr><td>科研教师（写作）</td><td>写引言/相关工作，引用必须真实</td><td>写作 Copilot 生成框架，参考文献只从库内取；中→英翻译保护公式与引用</td></tr>
+    <tr><td>算法工程师（复现）</td><td>找代码、判断可复现性、追踪新工作</td><td>GitHub 复现性评分、相关论文推荐、arXiv 追踪与个性化反馈</td></tr>
+    <tr><td>评审/答辩</td><td>快速验证功能真实、技术有深度</td><td>每个结论带页码引用；Agent 事件流可审计；107 条测试与实时指标可复现</td></tr>
+  </table>
+  <h3>2.3 非功能需求</h3>
+  <div class="grid2">
+    <div class="card"><h4>可追溯</h4><p>问答、图表解读、综述中的每条引用都能定位到论文、页码与原文片段；不允许只给结论。</p></div>
+    <div class="card"><h4>抗幻觉</h4><p>生成后做引用编号校验；证据不足明确拒答；综述与写作不伪造参考文献。</p></div>
+    <div class="card"><h4>可降级</h4><p>无 LLM → 抽取式回答；无向量 API → 384 维特征哈希；无 OCR → 标记 needs_ocr。</p></div>
+    <div class="card"><h4>可移植</h4><p>Docker Compose 一条命令；数据目录挂载；SQLite 单文件，不依赖外部向量库/图数据库。</p></div>
+    <div class="card"><h4>性能</h4><p>问答 2–5 秒；图谱首次 8–10 秒、缓存命中 0.3 秒；翻译按段落增量返回。</p></div>
+    <div class="card"><h4>安全</h4><p>API Key 只走环境变量；代码沙箱 AST 检查 + 资源限制；PDF 与切片本地存储。</p></div>
+  </div>
+  <h3>2.4 范围与边界</h3>
+  <ul>
+    <li><b>输入</b>：文本型 PDF、扫描件 PDF（中文 OCR）、arXiv 在线抓取；单篇与批量上传。</li>
+    <li><b>输出</b>：问答答案与证据、中文译文、Markdown/HTML/原版 PDF、引用图谱、领域综述、论文框架与图表代码。</li>
+    <li><b>不做</b>：不代替作者做实验、不生成虚假数据、不伪造参考文献；附录不单独打标，若解析出附录标题会进入标题树。</li>
+  </ul>
+  <div class="foot"><span>02 需求分析</span><span class="no">P5</span></div>
+</section>
+
+<!-- ================= P6 架构图 ================= -->
+<section class="sheet">
+  <h2>03 系统架构设计</h2>
+  <h3>3.1 总体架构：三层 + 一条降级链</h3>
+  <svg class="arch" viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#64748b"/></marker>
+      <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1d4ed8"/><stop offset="1" stop-color="#0f766e"/></linearGradient>
+    </defs>
+    <rect x="20" y="14" width="960" height="112" rx="8" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text x="38" y="38" font-size="14" font-weight="700" fill="#1e3a8a">展示层 · Next.js 14 App Router</text>
+    <g font-size="11" fill="#1e293b">
+      <rect x="38" y="52" width="118" height="52" rx="5" fill="#fff" stroke="#93c5fd"/><text x="60" y="82">文库 / 批量上传</text>
+      <rect x="168" y="52" width="100" height="52" rx="5" fill="#fff" stroke="#93c5fd"/><text x="196" y="82">问答</text>
+      <rect x="280" y="52" width="100" height="52" rx="5" fill="#fff" stroke="#93c5fd"/><text x="304" y="82">阅读器</text>
+      <rect x="392" y="52" width="100" height="52" rx="5" fill="#fff" stroke="#93c5fd"/><text x="416" y="82">引用图谱</text>
+      <rect x="504" y="52" width="110" height="52" rx="5" fill="#fff" stroke="#93c5fd"/><text x="528" y="82">Copilot</text>
+      <rect x="626" y="52" width="100" height="52" rx="5" fill="#fff" stroke="#93c5fd"/><text x="652" y="82">Agent</text>
+      <rect x="738" y="52" width="100" height="52" rx="5" fill="#fff" stroke="#93c5fd"/><text x="756" y="82">版本比对</text>
+      <rect x="850" y="52" width="110" height="52" rx="5" fill="#fff" stroke="#93c5fd"/><text x="868" y="82">追踪 / 洞察</text>
+    </g>
+    <text x="500" y="150" font-size="11" fill="#64748b" text-anchor="middle">REST / SSE（Next 路由透传，避免缓冲）</text>
+    <line x1="500" y1="128" x2="500" y2="166" stroke="#64748b" stroke-width="1.6" marker-end="url(#ar)"/>
+    <rect x="20" y="170" width="960" height="90" rx="8" fill="#fff7ed" stroke="#fed7aa"/>
+    <text x="38" y="194" font-size="14" font-weight="700" fill="#9a3412">API 层 · FastAPI（app.main:app）</text>
+    <g font-size="10.5" fill="#7c2d12">
+      <rect x="38" y="206" width="112" height="40" rx="4" fill="#fff" stroke="#fdba74"/><text x="58" y="231">papers / upload</text>
+      <rect x="160" y="206" width="90" height="40" rx="4" fill="#fff" stroke="#fdba74"/><text x="186" y="231">chat</text>
+      <rect x="260" y="206" width="90" height="40" rx="4" fill="#fff" stroke="#fdba74"/><text x="288" y="231">graph</text>
+      <rect x="360" y="206" width="90" height="40" rx="4" fill="#fff" stroke="#fdba74"/><text x="388" y="231">survey</text>
+      <rect x="460" y="206" width="104" height="40" rx="4" fill="#fff" stroke="#fdba74"/><text x="478" y="231">translate</text>
+      <rect x="574" y="206" width="96" height="40" rx="4" fill="#fff" stroke="#fdba74"/><text x="596" y="231">copilot</text>
+      <rect x="680" y="206" width="90" height="40" rx="4" fill="#fff" stroke="#fdba74"/><text x="708" y="231">code</text>
+      <rect x="780" y="206" width="90" height="40" rx="4" fill="#fff" stroke="#fdba74"/><text x="804" y="231">insights</text>
+      <rect x="880" y="206" width="80" height="40" rx="4" fill="#fff" stroke="#fdba74"/><text x="898" y="231">tracking</text>
+    </g>
+    <line x1="500" y1="260" x2="500" y2="296" stroke="#64748b" stroke-width="1.6" marker-end="url(#ar)"/>
+    <rect x="20" y="300" width="720" height="150" rx="8" fill="#ecfdf5" stroke="#a7f3d0"/>
+    <text x="38" y="324" font-size="14" font-weight="700" fill="#065f46">服务层 · 可组合的领域服务</text>
+    <g font-size="10.5" fill="#065f46">
+      <rect x="38" y="338" width="150" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="52" y="357">pdf_parser + OCR</text><text x="52" y="372" font-size="9" fill="#64748b">版式 / 标题 / 表格 / 公式</text>
+      <rect x="198" y="338" width="140" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="214" y="357">dedup</text><text x="214" y="372" font-size="9" fill="#64748b">MinHash / 版本差异</text>
+      <rect x="348" y="338" width="170" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="366" y="357">store / rag</text><text x="366" y="372" font-size="9" fill="#64748b">BM25 + 向量 + RRF</text>
+      <rect x="528" y="338" width="190" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="546" y="357">graph / survey / future</text><text x="546" y="372" font-size="9" fill="#64748b">PageRank / 抽取 / 校验</text>
+      <rect x="38" y="392" width="160" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="56" y="411">figures</text><text x="56" y="426" font-size="9" fill="#64748b">bbox 裁切 / 图内 OCR</text>
+      <rect x="208" y="392" width="170" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="226" y="411">citation_quality / drill</text><text x="226" y="426" font-size="9" fill="#64748b">含金量 / 下钻</text>
+      <rect x="388" y="392" width="140" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="406" y="411">copilot</text><text x="406" y="426" font-size="9" fill="#64748b">框架 / 图表 / 英译</text>
+      <rect x="538" y="392" width="180" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="556" y="411">agent</text><text x="556" y="426" font-size="9" fill="#64748b">16 工具 / SSE / 去重</text>
+    </g>
+    <rect x="760" y="300" width="220" height="150" rx="8" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text x="778" y="324" font-size="14" font-weight="700" fill="#5b21b6">模型与降级</text>
+    <g font-size="10.5" fill="#4c1d95">
+      <rect x="778" y="338" width="184" height="44" rx="4" fill="#fff" stroke="#c4b5fd"/><text x="796" y="357">LLM 网关（DeepSeek）</text><text x="796" y="372" font-size="9" fill="#64748b">OpenAI 兼容 / 可换 vLLM</text>
+      <rect x="778" y="392" width="184" height="44" rx="4" fill="#fff" stroke="#c4b5fd"/><text x="796" y="411">离线降级</text><text x="796" y="426" font-size="9" fill="#64748b">抽取式 / 哈希向量 / needs_ocr</text>
+    </g>
+    <rect x="20" y="470" width="960" height="70" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="38" y="494" font-size="14" font-weight="700" fill="#334155">数据层 · SQLite（WAL）+ 本地文件</text>
+    <g font-size="10" fill="#475569">
+      <text x="38" y="520">papers</text><text x="110" y="520">chunks（含 bbox / page / section）</text><text x="330" y="520">refs</text><text x="380" y="520">translations</text><text x="480" y="520">runs / agent 执行历史</text><text x="650" y="520">graph_cache</text><text x="750" y="520">feedback / track_runs</text>
+      <text x="38" y="536" font-size="9" fill="#64748b">data/app.db 单文件可交付；uploads/ 原始 PDF；figures/ 裁切缓存</text>
+    </g>
+  </svg>
+  <div class="callout"><span class="label">架构取舍</span>刻意不引入向量数据库、消息队列、图数据库：演示与评审场景下，SQLite 单文件 + 进程内计算即可支撑 23 篇 / 8,527 切片，部署成本最低，且离线可完整运行。规模扩大时，检索与图谱接口可无痛替换为外部服务。</div>
+  <h3>3.1.1 三条设计原则</h3>
+  <div class="grid3">
+    <div class="card"><h4>分层解耦</h4><p>展示层只调 API，API 只编排服务，服务只依赖数据层；换前端或换模型不影响解析与检索。</p></div>
+    <div class="card"><h4>证据优先</h4><p>所有 AI 能力先取证据再生成；证据不存在时宁可拒答，也不让模型自由发挥。</p></div>
+    <div class="card"><h4>降级可用</h4><p>每个外部依赖都有本地替代；任何一环失败只降低效果，不中断主流程。</p></div>
+  </div>
+  <div class="foot"><span>03 系统架构设计</span><span class="no">P6</span></div>
+</section>
+
+<!-- ================= P7 数据模型与链路 ================= -->
+<section class="sheet">
+  <h3>3.2 数据模型</h3>
+  <table class="tbl">
+    <tr><th style="width:18%">表</th><th>关键字段</th><th style="width:32%">用途</th></tr>
+    <tr><td>papers</td><td>id / title / authors / year / abstract / num_pages / meta</td><td>论文元数据；机构信息在 meta.affiliations</td></tr>
+    <tr><td>chunks</td><td>id / paper_id / page / kind / text / bbox / section / vec</td><td>结构化切片：paragraph / heading / table / formula / figure / caption / ocr / ref</td></tr>
+    <tr><td>refs</td><td>paper_id / idx / raw / title / arxiv_id / matched_paper</td><td>参考文献条目与库内匹配关系，供图谱与含金量分析</td></tr>
+    <tr><td>translations</td><td>chunk_id / lang / text</td><td>中文译文缓存，导出与对照阅读复用</td></tr>
+    <tr><td>runs</td><td>id / task / plan / events / status / duration</td><td>Agent 执行历史，支持回放与审计</td></tr>
+    <tr><td>graph_cache</td><td>version / payload</td><td>图谱按 graph_version 缓存，论文增删自动失效</td></tr>
+    <tr><td>feedback / track_runs</td><td>user_id / paper_id / vote / created_at</td><td>追踪推荐反馈与定时任务租约</td></tr>
+  </table>
+  <h3>3.3 关键链路</h3>
+  <h4>① 入库链路</h4>
+  <p>上传 → 计算 MinHash 指纹 → 判重（同版本 / arXiv 家族新版本）→ PyMuPDF 解析（双栏、字号、表格、公式、图注）→ 无文本层页面 OCR → 切片落库 → 异步补全 arXiv 元数据 → 建立引用与向量索引。</p>
+  <h4>② 问答链路</h4>
+  <svg viewBox="0 0 980 96" style="width:100%;height:auto;margin:2mm 0 3mm">
+    <defs><marker id="ar2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#475569"/></marker></defs>
+    <g font-size="9.5" fill="#0f172a">
+      <rect x="4" y="20" width="120" height="48" rx="5" fill="#eff6ff" stroke="#93c5fd"/><text x="20" y="42">问题 + 语言</text><text x="20" y="58">zh / en</text>
+      <rect x="148" y="20" width="120" height="48" rx="5" fill="#fff" stroke="#cbd5e1"/><text x="164" y="42">查询改写</text><text x="164" y="58">中文→英文关键词</text>
+      <rect x="292" y="20" width="150" height="48" rx="5" fill="#fff" stroke="#cbd5e1"/><text x="308" y="42">混合检索</text><text x="308" y="58">BM25 + 稠密向量</text>
+      <rect x="466" y="20" width="120" height="48" rx="5" fill="#fff" stroke="#cbd5e1"/><text x="482" y="42">RRF 融合</text><text x="482" y="58">k=60</text>
+      <rect x="610" y="20" width="130" height="48" rx="5" fill="#fff" stroke="#cbd5e1"/><text x="626" y="42">证据约束生成</text><text x="626" y="58">只依据检索片段</text>
+      <rect x="764" y="20" width="120" height="48" rx="5" fill="#f0fdf4" stroke="#86efac"/><text x="780" y="42">引用校验</text><text x="780" y="58">剔除非法 [S#]</text>
+      <rect x="908" y="20" width="68" height="48" rx="5" fill="#fef2f2" stroke="#fca5a5"/><text x="920" y="42">回答 /</text><text x="920" y="58">拒答</text>
+    </g>
+    <line x1="124" y1="44" x2="144" y2="44" stroke="#475569" marker-end="url(#ar2)"/>
+    <line x1="268" y1="44" x2="288" y2="44" stroke="#475569" marker-end="url(#ar2)"/>
+    <line x1="442" y1="44" x2="462" y2="44" stroke="#475569" marker-end="url(#ar2)"/>
+    <line x1="586" y1="44" x2="606" y2="44" stroke="#475569" marker-end="url(#ar2)"/>
+    <line x1="740" y1="44" x2="760" y2="44" stroke="#475569" marker-end="url(#ar2)"/>
+    <line x1="884" y1="44" x2="904" y2="44" stroke="#475569" marker-end="url(#ar2)"/>
+  </svg>
+  <h4>③ Agent 闭环</h4>
+  <p>任务 → 规划（JSON 步骤）→ 选择工具（16 个）→ 执行并观察 → 判断是否继续（最多 6 步）→ 汇总。全程 SSE 推送 <code>plan / step_start / tool_result / token / final</code> 事件，执行记录落库可回放。</p>
+  <h3>3.4 部署拓扑</h3>
+  <div class="grid2">
+    <div class="card"><h4>容器</h4><p><code>research-copilot-backend</code>（8000，健康检查 <code>/api/health</code>）与 <code>research-copilot-web</code>（3000），web 等 backend healthy 后启动。</p></div>
+    <div class="card"><h4>持久化</h4><p><code>./data</code> 挂载到 <code>/app/data</code>：SQLite、原始 PDF、图表裁切缓存；重建容器不丢数据。</p></div>
+  </div>
+  <div class="foot"><span>03 系统架构设计</span><span class="no">P7</span></div>
+</section>
+
+<!-- ================= P8 AI 选型 ================= -->
+<section class="sheet">
+  <h2>04 AI 技术方案 <span class="chip">赛题重点</span></h2>
+  <h3>4.1 选型理由 <span class="tag ai">AI 选型</span></h3>
+  <table class="tbl">
+    <tr><th style="width:15%">环节</th><th style="width:20%">选择</th><th style="width:38%">为什么选它</th><th>替代方案与代价</th></tr>
+    <tr><td>生成模型</td><td><b>DeepSeek / OpenAI 兼容网关</b></td><td>中文理解与写作强、成本低、函数调用稳定；通过 <code>LLM_BASE_URL</code> 可无缝换 Qwen / GPT / 本地 vLLM，不绑死厂商。</td><td>GPT-4：效果接近但成本高；本地 7B：部署门槛高、工具调用不稳定。</td></tr>
+    <tr><td>Embedding</td><td><b>384 维特征哈希（默认）+ 可选 BGE-M3</b></td><td>零外部依赖、断网可用，保证评审现场不会因向量服务失败而中断；有 Key 时可切在线模型提升语义召回。</td><td>外部向量库：多一个服务与网络依赖，演示风险高。</td></tr>
+    <tr><td>检索</td><td><b>BM25 稀疏 + 稠密向量 + RRF</b></td><td>BM25 对术语、编号、公式符号敏感；稠密向量抗同义改写；RRF 只依赖排名，不需要分数归一化。</td><td>纯向量：专有名词与编号召回不稳；纯 BM25：跨语言与改写弱。</td></tr>
+    <tr><td>解析</td><td><b>PyMuPDF + PaddleOCR</b></td><td>PyMuPDF 提供字体、字号、bbox、阅读顺序，能还原版式；PaddleOCR 中文模型预下载进镜像，断网可用。</td><td>pdfplumber：版式信息少；云 OCR：需联网、按量计费。</td></tr>
+    <tr><td>知识图谱</td><td><b>NetworkX PageRank</b></td><td>23–千级节点规模下内存计算足够快；无需图数据库，结果可缓存进 SQLite。</td><td>Neo4j：运维成本高，对当前规模过度设计。</td></tr>
+    <tr><td>存储</td><td><b>SQLite（WAL）</b></td><td>单文件随仓库交付、事务可靠、零配置；BM25 与向量在进程内计算，评测环境一键复现。</td><td>Postgres + pgvector：需要额外容器与初始化脚本。</td></tr>
+    <tr><td>Agent</td><td><b>自研 JSON 规划 + SSE</b></td><td>工具选择、参数、观察结果全部可见；可按「工具 + 关键参数」去重；执行历史可回放，适合答辩讲清每一步。</td><td>LangChain：抽象层厚，事件流与去重不易讲透。</td></tr>
+  </table>
+  <div class="callout ai"><span class="label">选型原则</span>不是「用最新最大的模型」，而是<b>在评审环境里稳定可复现</b>：所有外部依赖都必须有离线替代，所有 AI 输出都必须能回到原文证据。</div>
+  <div class="foot"><span>04 AI 技术方案</span><span class="no">P8</span></div>
+</section>
+
+<!-- ================= P9 AI 集成 ================= -->
+<section class="sheet">
+  <h3>4.2 集成方式 <span class="tag int">集成</span></h3>
+  <h4>① 统一的 OpenAI 兼容网关</h4>
+  <p>所有生成能力（问答、翻译、综述、写作、Agent 汇总）走同一个 <code>llm.chat()</code> 封装，通过 <code>LLM_BASE_URL / LLM_API_KEY / LLM_MODEL</code> 配置。换模型只改环境变量，不改业务代码；无 Key 时 <code>llm.is_available()</code> 为 false，自动进入离线分支。</p>
+  <h4>② 证据约束的 Prompt 契约</h4>
+  <div class="card" style="font-size:8.8pt">
+    <p><b>System：</b>只能依据给定的检索片段回答；每个结论后标注 <code>[S#]</code>；证据不足时明确说「文献库中没有检索到相关内容」，禁止补充外部知识。<br>
+    <b>User：</b>问题 + 编号证据片段（含论文标题、页码、原文）。<br>
+    <b>后处理：</b>正则抽取答案中的 <code>[S#]</code>，与本次召回集合比对；非法编号剔除并告警；若没有任何有效引用，降级为拒答或抽取式摘要。</p>
+  </div>
+  <h4>③ 工具调用与事件流</h4>
+  <p>Agent 的 16 个工具以 JSON Schema 描述（检索、图表理解、Future Work、综述、翻译、代码沙箱、arXiv 检索、复现性、推荐等）。规划器输出步骤列表，执行器逐步调用并把 <code>tool_result</code> 回填上下文；SSE 由 Next.js Route Handler 直接透传，避免 rewrite 缓冲导致「看起来卡住」。</p>
+  <h4>④ 多模态图理解</h4>
+  <p>问答中识别「图 N / Figure N」→ 在图注块中定位 → PyMuPDF 按 bbox 2× 裁切 → OCR 图内文字 → 图注 + 同页正文 + OCR 文本作为唯一依据交给模型解读。阅读器内联图片接口使用 <code>with_ocr=False</code>，只裁图不 OCR，避免批量打开论文时的内存峰值。</p>
+  <h4>⑤ 翻译的占位符协议</h4>
+  <p>译前把 <code>$...$</code> 公式、<code>[12]</code> 引用、URL、代码块替换为不可翻译占位符，译后还原。这样中→英与英→中都不会破坏 LaTeX 与引用编号；离线时直接返回明确提示，<b>不输出伪译文</b>。</p>
+  <div class="callout int"><span class="label">集成边界</span>模型只做「语言组织」，不做「事实来源」。论文解析、检索、引用匹配、图谱、评分全部由确定性代码完成，模型无法绕过证据层直接编造。</div>
+  <div class="foot"><span>04 AI 技术方案</span><span class="no">P9</span></div>
+</section>
+
+<!-- ================= P10 优化策略 ================= -->
+<section class="sheet">
+  <h3>4.3 优化策略 <span class="tag opt">优化</span></h3>
+  <table class="tbl">
+    <tr><th style="width:20%">策略</th><th>做法</th><th style="width:26%">效果 / 证据</th></tr>
+    <tr><td>结构化切片</td><td>按 900 字符 / 120 重叠切分，保留 page、bbox、section、kind；标题、表格、公式、图注单独成块。</td><td>检索命中后可直接跳页码与高亮区域</td></tr>
+    <tr><td>混合检索 + RRF</td><td>BM25 与稠密向量各取 Top-K，按排名融合（k=60），不做分数归一化。</td><td>hybrid recall@1 0.75 / recall@5 0.95 / MRR@10 0.833</td></tr>
+    <tr><td>长文档分层检索</td><td>章节级粗索引（无章节按 10 页分带）→ RRF 选 6 节 → 块级下钻 → 与全局结果按 chunk_id 再融合。</td><td>hierarchical recall@1 0.80，优于全局 0.75</td></tr>
+    <tr><td>跨语言查询改写</td><td>中文问题先经 LLM 改写为英文检索关键词，单独一路参与 RRF；希腊字母英文名扩展为符号（beta1→β1）。</td><td>中文提问也能召回英文原文</td></tr>
+    <tr><td>语义去重</td><td>64-permutation MinHash + shingle(5)，阈值 0.45；arXiv 底号强关联，区分同版本与不同版本。</td><td>重复上传直接拦截；版本差异可结构化展示</td></tr>
+    <tr><td>缓存</td><td>图谱按 graph_version 缓存；译文按 chunk 缓存；图表裁切落盘复用；S2 结果 300 秒缓存。</td><td>图谱首次 8–10 秒 → 命中 0.3 秒</td></tr>
+    <tr><td>Agent 去重</td><td>默认参数填充后按「工具 + 关键参数」生成语义键，大小写/空白/列表顺序不敏感。</td><td>避免同一工具同参数重复调用</td></tr>
+    <tr><td>内存控制</td><td>阅读器内联图禁用 OCR；OCR 仅在问答/解析需要时触发；代码沙箱限制 3GB 地址空间。</td><td>修复批量打开论文导致的后端 OOM</td></tr>
+  </table>
+  <h3>4.4 抗幻觉与可解释性 <span class="tag proof">实测</span></h3>
+  <div class="grid2">
+    <div class="card"><h4>四道闸门</h4><p>① 只召回库内切片；② Prompt 限定只依据证据；③ 生成后校验 [S#] 合法性；④ 无有效证据则拒答。四道闸门任一不满足都不会输出结论。</p></div>
+    <div class="card"><h4>可核验输出</h4><p>答案附证据卡（论文、页码、原文片段、bbox）；点击可跳阅读器并高亮；图表解读附裁剪原图与图内 OCR 文本。</p></div>
+    <div class="card"><h4>不伪造参考文献</h4><p>综述与写作的参考文献只从库内 papers / refs 取；综述中的 [P#] 逐条校验，非法编号与伪造 References 段直接剔除。</p></div>
+    <div class="card"><h4>离线不装懂</h4><p>翻译无在线模型时返回明确提示；问答降级为抽取式摘要并标注模式；OCR 失败标记 needs_ocr 而不是编造文本。</p></div>
+  </div>
+  <div class="callout opt"><span class="label">可复现</span>检索指标由 <code>backend/scripts/bench_retrieval.py</code> 跑 20 条冒烟查询得到；Agent 指标由 <code>bench_agent.py</code> 跑 10 个固定任务得到（成功率 10/10，平均 1.4 步、23.7 秒）。</div>
+  <div class="foot"><span>04 AI 技术方案</span><span class="no">P10</span></div>
+</section>
+
+<!-- ================= P11 模块一 ================= -->
+<section class="sheet">
+  <h2>05 核心功能实现</h2>
+  <h3>5.1 模块一：PDF 管理与多模态细粒度解析</h3>
+  <div class="grid2">
+    <div class="figure"><img src="screenshots/14-reader-affiliations.png" alt="阅读页机构信息"><div class="cap">阅读页：标题、作者、🏛 自动抽取的机构信息、摘要与工具栏</div></div>
+    <div class="figure"><img src="screenshots/11-figure.png" alt="图表理解"><div class="cap">图表理解：问答中「图 N」返回裁剪原图、图注、图内 OCR 与证据页码</div></div>
+  </div>
+  <h4>实现要点</h4>
+  <ul>
+    <li><b>批量上传</b>：文件框 <code>multiple</code> + 拖拽多文件，前端串行调用上传接口，汇总成功 / 重复 / 失败；重复项提示「建议保留最新版本」，失败条目逐条展示，不静默吞错。</li>
+    <li><b>语义去重</b>：MinHash 指纹判定同版本；arXiv 同底号不同版本给出结构化差异（正文重合度、章节增删、关键词），而不是简单拒绝。</li>
+    <li><b>细粒度解析</b>：双栏阅读顺序还原；字号聚类生成一/二/三级标题树；表格转 Markdown 并在阅读器渲染为原生 <code>&lt;table&gt;</code>；公式、图注、参考文献分别成块；扫描件走 PaddleOCR 中文模型。</li>
+    <li><b>机构信息</b>：优先读取原 PDF 首页「标题 → Abstract」之间的作者区文本，逐行匹配 University / Institute / Google / Microsoft 等机构线索，去邮箱、去重、最多 6 条；无文本层时退回首页 OCR；<b>不编造</b>，抽取不到就留空。</li>
+    <li><b>图表呈现</b>：<code>GET /papers/{id}/figures</code> 列出图号 / 页码 / 图注；阅读器按图注块懒加载 <code>/figures/{n}/image</code>，PyMuPDF 2× 裁切并落盘缓存；图表接口禁用 OCR，避免内存峰值。</li>
+  </ul>
+  <div class="callout proof"><span class="label">实测</span>FlashAttention 自动抽取到 <code>Department of Computer Science, Stanford University</code> 与 <code>University at Buffalo, SUNY</code>；Chain-of-Thought 抽取到 <code>Google Research, Brain Team</code>；图表接口 3 张图均返回 <code>image/png</code>（57–79KB），后端保持 healthy。</div>
+  <div class="foot"><span>05 核心功能实现 · 模块一</span><span class="no">P11</span></div>
+</section>
+
+<!-- ================= P12 模块二 ================= -->
+<section class="sheet">
+  <h3>5.2 模块二：RAG 精准问答与跨文献对比</h3>
+  <div class="figure"><img src="screenshots/02-chat.png" alt="RAG 问答"><div class="cap">问答页：流式答案、[S#] 引用、证据卡（论文 / 页码 / 原文片段）、置信度与模式标识</div></div>
+  <div class="grid2">
+    <div class="card"><h4>检索</h4><p>BM25 + 384 维稠密向量，RRF(k=60) 融合；中文问题改写英文关键词单独一路；支持长文档分层检索开关。</p></div>
+    <div class="card"><h4>生成与校验</h4><p>只依据证据片段生成；答案中每个 <code>[S#]</code> 对应一条证据；生成后校验编号，非法引用剔除；无证据拒答。</p></div>
+  </div>
+  <h4>跨文献对比</h4>
+  <p>选定多篇论文后，按「核心方法 / 参数规模 / 实验结论 / 继承与抛弃关系」分维度对比；在线 LLM 只依据检索证据并标注 <code>[S#]</code>，要求指出承接、改进、被替换的设计及参数量/上下文长度演化；无 LLM 时退回逐篇证据卡片，仍可读。版本比对页同时展示正文重合度、章节增删与关键词差异。</p>
+  <div class="callout"><span class="label">评审看点</span>故意问「这篇论文的代码开源在哪个 GitHub 仓库？」这类库内没有的问题，系统会拒答，而不是编一个仓库地址。这是抗幻觉最直观的演示。</div>
+  <div class="foot"><span>05 核心功能实现 · 模块二</span><span class="no">P12</span></div>
+</section>
+
+<!-- ================= P13 模块三 ================= -->
+<section class="sheet">
+  <h3>5.3 模块三：版式阅读、双向引用与中英对照</h3>
+  <div class="figure"><img src="screenshots/03-reader.png" alt="阅读器"><div class="cap">阅读器：分页版式、标题树、原生表格、[n] 角标、左右对照与导出工具栏</div></div>
+  <div class="grid3">
+    <div class="card"><h4>双向引用</h4><p>正文 <code>[11]</code> / <code>[11,12]</code> / <code>[11–13]</code> 渲染为可点击角标；点击滚动并高亮 References 条目；条目「↩ 正文」回到首次引用段落。</p></div>
+    <div class="card"><h4>同步滚动</h4><p>左右双栏按内容比例同步；滚动锁避免互相触发抖动；移动端退化为上下堆叠。</p></div>
+    <div class="card"><h4>翻译保护</h4><p>公式、引用、URL、代码块占位符保护；支持整篇、段落、划词、悬停四种粒度；译文按段落增量补齐。</p></div>
+  </div>
+  <h4>导出</h4>
+  <p>支持 Markdown / HTML（可附加已缓存中文译文）与原版 PDF 下载。导出只使用已落库的真实切片与译文，不重新生成内容；Markdown 转义 HTML 特殊字符，避免注入。</p>
+  <div class="callout proof"><span class="label">实测</span>左右对照同步滚动：左栏滚动 2595px，右栏同步 500px（比例一致）；正文点击 [12] 可跳转并高亮，条目「↩ 正文」可跳回。</div>
+  <div class="foot"><span>05 核心功能实现 · 模块三</span><span class="no">P13</span></div>
+</section>
+
+<!-- ================= P14 模块四 ================= -->
+<section class="sheet">
+  <h3>5.4 模块四：参考文献含金量、下钻与 arXiv 追踪</h3>
+  <div class="figure"><img src="screenshots/10-insights.png" alt="学术洞察与复现性"><div class="cap">阅读页「学术洞察」：复现性评分、开源仓库、相关论文推荐；参考文献含金量卡片同页</div></div>
+  <table class="tbl">
+    <tr><th style="width:24%">能力</th><th>实现</th><th style="width:24%">实测</th></tr>
+    <tr><td>引用含金量</td><td>正文提及（数字标记 + 标题关键词，排除 References 块）+ 语义线索（提出/改进/采用/对比/启发/局限）+ 章节位置，加权 0–100 分；正文零提及判为应付式。</td><td>T5 论文 27 条参考文献，分析 1.5s：高价值 3 / 一般 8 / 弱引用 11 / 应付式 5</td></tr>
+    <tr><td>批量下钻</td><td>默认过滤 &lt;30 分；标题相似度 ≥0.55 才入库；后台任务逐条解析 arXiv id → 下载 → 入库；任务进度可轮询。</td><td>下钻任务返回逐条结果与状态</td></tr>
+    <tr><td>arXiv 追踪</td><td>从本地库提炼 3 组主题 → 按投稿时间倒序检索 → 词面覆盖 0.75 + 库内最佳向量相似度 0.25 → 可核实推荐理由；开源仓库 +0.18。</td><td>23 篇库；单次抓取 22 篇约 18s</td></tr>
+    <tr><td>反馈重排</td><td>点赞/踩写入 <code>feedback</code> 表，按用户画像重排；多用户互不影响。</td><td>推荐列表按反馈变化</td></tr>
+  </table>
+  <div class="callout"><span class="label">设计意图</span>把「参考文献」从静态列表变成可决策的数据：哪些必须读、哪些只是凑数、哪些值得下载入库，都能给出分档与理由。</div>
+  <div class="foot"><span>05 核心功能实现 · 模块四</span><span class="no">P14</span></div>
+</section>
+
+<!-- ================= P15 模块五 ================= -->
+<section class="sheet">
+  <h3>5.5 模块五：引用图谱与领域综述</h3>
+  <div class="figure"><img src="screenshots/04-graph.png" alt="引用图谱"><div class="cap">引用图谱：23 节点 / 42 条边；PageRank 分层配色，版本关系虚线；右侧 Future Idea 与「领域综述」入口</div></div>
+  <div class="grid2">
+    <div class="card"><h4>图谱构建</h4><p>参考文献标题与库内论文匹配（1,139 条中匹配 54 条）；NetworkX PageRank 分 bedrock / normal / frontier 三层；同系列版本用虚线。</p></div>
+    <div class="card"><h4>Future Work</h4><p>抽取 Future Work / 展望段落并判断是否已被后续论文覆盖；当前 79 条，其中 12 条 open。</p></div>
+  </div>
+  <h4>领域综述生成</h4>
+  <ul>
+    <li>输入：图谱 PageRank 排序 + Future Work open 项 + 库内真实标题 / 摘要 / 年份。</li>
+    <li>在线：LLM 只能引用给定 <code>[P#]</code>；生成后校验编号，非法编号与伪造 References 段一律剔除。</li>
+    <li>离线：确定性抽取式模板（时间脉络 / 核心工作 / 主题词 / 开放问题），参考文献仍为库内真实条目。</li>
+  </ul>
+  <div class="callout innov"><span class="label">创新</span>综述不是「让模型写一篇」，而是「先构图、再排序、后写作」：引用集合在生成前就已确定，模型只负责组织语言，因此不会出现看似合理但不存在的文献。</div>
+  <div class="foot"><span>05 核心功能实现 · 模块五</span><span class="no">P15</span></div>
+</section>
+
+<!-- ================= P16 模块六 ================= -->
+<section class="sheet">
+  <h3>5.6 模块六：写作 Copilot</h3>
+  <div class="figure"><img src="screenshots/05-copilot.png" alt="写作 Copilot"><div class="cap">Copilot：论文框架、Mermaid/TikZ/Graphviz/Matplotlib 图表、CSV 转图、中→英学术翻译</div></div>
+  <table class="tbl">
+    <tr><th style="width:18%">能力</th><th>实现</th><th style="width:30%">约束</th></tr>
+    <tr><td>论文框架</td><td>按 7 章节（Abstract → Conclusion）生成提纲，附每节写作要点与库内可引用论文。</td><td>参考文献只从库内 23 篇取，不伪造</td></tr>
+    <tr><td>图表</td><td>Mermaid / TikZ / Graphviz DOT / Matplotlib Python 四类；均有离线可运行模板。</td><td>代码块可直接复制执行</td></tr>
+    <tr><td>CSV 转图</td><td>解析 CSV 表头与数值列，生成 Matplotlib 脚本或图表建议。</td><td>不臆造数据，只基于上传 CSV</td></tr>
+    <tr><td>学术英译</td><td>中→英；支持粘贴中文或载入库内论文摘要；公式/引用/URL 占位符保护。</td><td>无在线模型时明确提示，不输出假译文</td></tr>
+  </table>
+  <div class="callout int"><span class="label">集成细节</span>Copilot 的每个子能力都是独立接口（<code>/api/copilot/outline</code>、<code>/diagram</code>、<code>/csv</code> 与 <code>/api/translate</code>），前端只做参数编排；因此同一能力可被 Agent 作为工具复用。</div>
+  <div class="foot"><span>05 核心功能实现 · 模块六</span><span class="no">P16</span></div>
+</section>
+
+<!-- ================= P17 Agent ================= -->
+<section class="sheet">
+  <h3>5.7 Agent 闭环：规划 → 调用 → 观察 → 汇总</h3>
+  <div class="figure"><img src="screenshots/06-agent.png" alt="Agent 执行"><div class="cap">Agent：plan 步骤、step_start、tool_result、token 流与最终结论</div></div>
+  <div class="grid2">
+    <div class="figure"><img src="screenshots/06b-agent-history.png" alt="Agent 历史"><div class="cap">执行历史：状态、耗时、规划与工具调用可回放</div></div>
+    <div class="card"><h4>16 个工具</h4><p>检索问答、图表理解、Future Work、领域综述、翻译、代码沙箱、arXiv 检索/入库、复现性、推荐、版本差异、引用质量等。</p>
+      <h4 style="margin-top:3mm">去重与上限</h4><p>按「工具 + 关键参数」语义去重；最多 6 步；每步事件实时 SSE 推送并落库。</p>
+    </div>
+  </div>
+  <h4>为什么不是「一次性回答」</h4>
+  <p>Agent 先输出计划，再根据工具返回决定下一步；例如「总结创新点并列出研究方向」会走：<code>answer_question</code> → <code>future_work</code> → <code>final</code>。这样每一步都有可核查的中间证据，而不是让模型凭记忆写一段。</p>
+  <div class="callout proof"><span class="label">实测</span>10 个固定任务成功率 10/10；平均 1.4 步、23.7 秒；8/10 任务最终结论带页码引用。Docker 环境首字节 0.287s，56 个事件分块完整。</div>
+  <div class="foot"><span>05 核心功能实现 · Agent</span><span class="no">P17</span></div>
+</section>
+
+<!-- ================= P18 测试 ================= -->
+<section class="sheet">
+  <h2>06 测试与部署</h2>
+  <h3>6.1 测试体系与结果</h3>
+  <div class="kpis">
+    <div class="kpi"><div class="n">107</div><div class="l">pytest 通过</div></div>
+    <div class="kpi"><div class="n">4</div><div class="l">条件跳过</div></div>
+    <div class="kpi"><div class="n">10/10</div><div class="l">Agent 任务成功</div></div>
+    <div class="kpi"><div class="n">20</div><div class="l">检索冒烟查询</div></div>
+  </div>
+  <table class="tbl">
+    <tr><th style="width:26%">测试文件</th><th>覆盖内容</th></tr>
+    <tr><td>test_smoke.py</td><td>健康检查、论文入库、切片、检索、图谱、删除、翻译、上传与导出</td></tr>
+    <tr><td>test_module4.py</td><td>引用含金量打分、批量下钻、arXiv 追踪、反馈重排</td></tr>
+    <tr><td>test_module56.py</td><td>领域综述与 [P#] 引用校验、Graphviz/Matplotlib 模板、中→英不伪造、Markdown/HTML 导出、机构抽取与图表列表</td></tr>
+  </table>
+  <p>测试使用隔离临时库，不污染演示数据；容器内执行 <code>python -m pytest tests/ -q</code>，当前结果 <b>107 passed, 4 skipped</b>。跳过项为需要在线模型或特定系统条件的用例，不影响离线功能。</p>
+  <h3>6.2 实测指标</h3>
+  <table class="tbl">
+    <tr><th style="width:28%">指标</th><th>实测值</th><th style="width:30%">复现方式</th></tr>
+    <tr><td>演示库规模</td><td>23 篇 / 8,527 切片 / 1,139 条参考文献 / 796 条译文</td><td><code>GET /api/papers/stats</code></td></tr>
+    <tr><td>检索质量</td><td>hybrid recall@1 0.75 / recall@5 0.95 / MRR@10 0.833；分层 0.80 / 0.95 / 0.867</td><td><code>bench_retrieval.py</code></td></tr>
+    <tr><td>问答时延</td><td>约 2–5 秒（在线 DeepSeek）</td><td><code>POST /api/chat</code></td></tr>
+    <tr><td>引用图谱</td><td>23 节点 / 42 边 / 6 基石 / 1 前沿；首次 8–10s，缓存 0.3s</td><td><code>GET /api/graph</code></td></tr>
+    <tr><td>Future Work</td><td>79 条抽取，12 条 open</td><td><code>GET /api/future</code></td></tr>
+    <tr><td>引用含金量</td><td>T5 27 条，分析 1.5s；高价值 3 / 一般 8 / 弱引用 11 / 应付式 5</td><td><code>GET /api/papers/{id}/refs/quality</code></td></tr>
+    <tr><td>图表理解</td><td>裁剪原图 57–79KB PNG + 图内 OCR 文本</td><td><code>GET /api/figures/{id}/{n}</code></td></tr>
+    <tr><td>Agent</td><td>10/10；平均 1.4 步 / 23.7s；8/10 带页码引用</td><td><code>bench_agent.py</code></td></tr>
+  </table>
+  <div class="foot"><span>06 测试与部署</span><span class="no">P18</span></div>
+</section>
+
+<!-- ================= P19 部署与安全 ================= -->
+<section class="sheet">
+  <h3>6.3 部署与配置</h3>
+  <div class="grid2">
+    <div class="card"><h4>一键启动</h4><p><code>docker compose up -d --build</code><br>后端 8000 / 前端 3000；后端健康检查通过后前端才启动；<code>./data</code> 挂载持久化。</p></div>
+    <div class="card"><h4>环境变量</h4><p><code>LLM_BASE_URL / LLM_API_KEY / LLM_MODEL</code>；<code>EMBEDDING_PROVIDER</code>；<code>DATA_DIR / DB_PATH</code>；<code>OCR_ENABLED / OCR_LANG</code>；<code>CORS_ORIGINS</code>。模板见 <code>backend/.env.example</code>。</p></div>
+    <div class="card"><h4>依赖清单</h4><p>后端 12 项（FastAPI / PyMuPDF / PaddleOCR / NetworkX / NumPy 等）；前端 Next.js 14 + React 18 + TypeScript；无额外向量库/图数据库。</p></div>
+    <div class="card"><h4>离线可用</h4><p>OCR 中文模型预下载进镜像；无 Key 时自动降级；断网仍可解析、检索、阅读、图谱与抽取式问答。</p></div>
+  </div>
+  <h3>6.4 安全与合规</h3>
+  <table class="tbl">
+    <tr><th style="width:24%">风险</th><th>措施</th></tr>
+    <tr><td>API Key 泄露</td><td>Key 只通过环境变量注入；仓库只保留 <code>.env.example</code>；公开仓库不含任何真实 Key。</td></tr>
+    <tr><td>代码执行</td><td>沙箱 AST 静态检查（危险模块/调用/逃逸链属性）+ POSIX <code>setsid</code> + CPU 30s / 地址空间 3GB 限制；5 种逃逸攻击实测全拦。</td></tr>
+    <tr><td>路径穿越</td><td>图片/产物文件名白名单校验；PDF 路径多级回退但限定在数据目录。</td></tr>
+    <tr><td>数据边界</td><td>PDF、切片、译文全部本地存储；只把检索命中的片段发送给模型；不训练、不外传全量文档。</td></tr>
+    <tr><td>输出注入</td><td>Markdown 导出转义 HTML；前端渲染不使用 <code>dangerouslySetInnerHTML</code> 处理用户内容。</td></tr>
+  </table>
+  <div class="note">提交前请再次确认：GitHub 仓库为 Public（或给评审开放权限）；<code>git log</code> 中无 Key 提交；演示视频与在线地址已补入 README。</div>
+  <div class="foot"><span>06 测试与部署</span><span class="no">P19</span></div>
+</section>
+
+<!-- ================= P20 创新点 技术 ================= -->
+<section class="sheet">
+  <h2>07 创新点 <span class="chip red">赛题要求明确列出</span></h2>
+  <h3>7.1 技术创新点</h3>
+  <div class="grid2">
+    <div class="card"><h4><span class="tag innov">T1</span>块级证据链贯穿全流程</h4><p>解析产物不是纯文本，而是带 page / bbox / section / kind 的结构化块；检索、问答、图表解读、引用跳转、导出全部复用同一套块，任何结论都能回到原文位置。</p></div>
+    <div class="card"><h4><span class="tag innov">T2</span>多路检索融合</h4><p>BM25 + 稠密向量 + 中文查询改写 + 分层检索，四路结果按 chunk_id 做 RRF 再融合，兼顾术语、语义、跨语言与长文档。</p></div>
+    <div class="card"><h4><span class="tag innov">T3</span>生成后引用校验</h4><p>不是「提示模型别编」，而是在生成后用正则与召回集合做硬校验：非法 [S#] 剔除、无有效引用则拒答，形成可验证的抗幻觉闭环。</p></div>
+    <div class="card"><h4><span class="tag innov">T4</span>占位符保护翻译</h4><p>公式 / 引用 / URL / 代码块先替换为占位符再翻译，译后还原；离线时明确拒绝而不输出伪译文，保证双语阅读不破坏 LaTeX。</p></div>
+    <div class="card"><h4><span class="tag innov">T5</span>语义去重与版本结构化</h4><p>MinHash 判定同版本，arXiv 同底号不同版本给出正文重合度、章节增删与关键词差异，而不是简单拒绝上传。</p></div>
+    <div class="card"><h4><span class="tag innov">T6</span>可审计 Agent</h4><p>自研 JSON 规划 + SSE 事件流 + 工具调用语义去重 + 执行落库回放；每一步「为什么调这个工具」都可解释。</p></div>
+    <div class="card"><h4><span class="tag innov">T7</span>多模态图表理解</h4><p>图注定位 → bbox 裁切 → 图内 OCR → 仅依据图注/同页正文/OCR 作答；阅读器内联图与问答图共用裁切缓存。</p></div>
+  </div>
+  <div class="callout innov"><span class="label">技术差异</span>大多数参赛作品停留在「调模型 + 向量库」；本项目的技术重心在<b>证据层与校验层</b>：先把 PDF 变成可定位的结构化证据，再让模型在证据内工作，最后对输出做硬校验。</div>
+  <div class="foot"><span>07 创新点</span><span class="no">P20</span></div>
+</section>
+
+<!-- ================= P21 创新点 应用 ================= -->
+<section class="sheet">
+  <h3>7.2 应用创新点</h3>
+  <table class="tbl">
+    <tr><th style="width:7%">编号</th><th style="width:22%">应用创新</th><th>用户价值</th></tr>
+    <tr><td><b>A1</b></td><td>科研 PDF 全流程一站式</td><td>入库、去重、精读、问答、翻译、引用分析、综述、写作、Agent 在同一界面完成，不需要在 5–6 个工具间复制粘贴。</td></tr>
+    <tr><td><b>A2</b></td><td>参考文献四档含金量</td><td>把「引用次数」换成「正文是否真的用了」，帮研究生快速判断哪些文献必须精读、哪些只是凑数。</td></tr>
+    <tr><td><b>A3</b></td><td>可核验的领域综述</td><td>综述中的每条 [P#] 都指向库内真实论文；离线也有抽取式版本，开题调研可直接用。</td></tr>
+    <tr><td><b>A4</b></td><td>不伪造引用的写作 Copilot</td><td>框架、图表、英译都可直接用于论文初稿；参考文献只从库内取，避免「看起来很像」的假引用。</td></tr>
+    <tr><td><b>A5</b></td><td>arXiv 动态追踪 + 个性化反馈</td><td>从自己的库提炼主题，自动抓新论文并按相关度排序；点赞踩会改变后续推荐，越用越准。</td></tr>
+    <tr><td><b>A6</b></td><td>全链路离线降级</td><td>评审现场断网/无 Key 也能完整演示解析、检索、阅读、图谱与抽取式问答，不会「一断网就白屏」。</td></tr>
+    <tr><td><b>A7</b></td><td>单文件交付与一键部署</td><td>SQLite 单文件 + Docker Compose；换机、评审复现、答辩演示都不需要 DBA 或运维。</td></tr>
+  </table>
+  <h3>7.3 与「直接调用大模型」的差异</h3>
+  <table class="tbl">
+    <tr><th style="width:22%">维度</th><th style="width:39%">直接调用大模型</th><th>本项目</th></tr>
+    <tr><td>引用</td><td>可能编造文献、页码、仓库地址</td><td>只引用库内真实切片；生成后校验，非法引用剔除</td></tr>
+    <tr><td>定位</td><td>只能给一段文字</td><td>每条结论可跳转到论文页码并高亮 bbox</td></tr>
+    <tr><td>版面</td><td>看不到双栏、表格、公式、图注</td><td>结构化解析 + 原生表格 + 公式块 + 图表裁切</td></tr>
+    <tr><td>长文</td><td>受上下文限制，容易漏读</td><td>分层检索：章节粗索引 → 块级下钻 → RRF 合并</td></tr>
+    <tr><td>离线</td><td>无网络即不可用</td><td>三级降级，断网仍可完成核心流程</td></tr>
+    <tr><td>可审计</td><td>黑盒输出</td><td>Agent 事件流、工具参数、执行历史全部可见</td></tr>
+    <tr><td>数据</td><td>文档需上传到第三方</td><td>本地存储，只发送检索命中的片段</td></tr>
+  </table>
+  <div class="callout ai"><span class="label">一句话总结</span>把大模型从「知道很多」变成「只能依据你的文献说话」，并且每句话都能被检查。</div>
+  <div class="foot"><span>07 创新点</span><span class="no">P21</span></div>
+</section>
+
+<!-- ================= P22 总结 ================= -->
+<section class="sheet">
+  <h2>08 总结与展望</h2>
+  <h3>8.1 已完成</h3>
+  <ul>
+    <li>赛题六个模块 + Agent 闭环全部落地，均有页面入口、API 与自动化测试，不存在占位功能。</li>
+    <li>演示库 23 篇 / 8,527 切片 / 1,139 条参考文献 / 796 条译文；107 条测试通过，4 条条件跳过。</li>
+    <li>检索、图谱、Agent、引用含金量等关键指标均有可复现脚本与实测数据。</li>
+    <li>技术文档、README、评分映射、8 分钟录屏脚本、提交包齐备。</li>
+  </ul>
+  <h3>8.2 已知局限</h3>
+  <table class="tbl">
+    <tr><th style="width:24%">局限</th><th>说明与应对</th></tr>
+    <tr><td>OCR 上限</td><td>手写体、低分辨率扫描件识别率有限；页面标记 <code>needs_ocr</code>，不编造文本。</td></tr>
+    <tr><td>极端版式</td><td>少量双栏 PDF 会出现单词粘连（如 otherstrategies），阅读页可对照原文核对。</td></tr>
+    <tr><td>评测集规模</td><td>检索 20 条、Agent 10 条为自建小集；已支持 BEIR 风格 qrels，可换公开数据集。</td></tr>
+    <tr><td>机构与附录</td><td>机构从首页作者区抽取，预印本本身未写机构时留空；附录未单独打标，若解析出标题会进标题树。</td></tr>
+    <tr><td>在线演示</td><td>当前为本机 Docker 演示，公网地址需在提交前部署。</td></tr>
+  </table>
+  <h3>8.3 后续计划</h3>
+  <div class="grid3">
+    <div class="card"><h4>格式扩展</h4><p>支持 LaTeX 源码、Word、HTML 论文；公式转 MathML 便于复制。</p></div>
+    <div class="card"><h4>评测扩展</h4><p>接入 BEIR / SciFact 等公开检索与事实核查数据集，做横向对比。</p></div>
+    <div class="card"><h4>协作与部署</h4><p>多用户空间、团队共享库；提供公网部署模板与对象存储方案。</p></div>
+  </div>
+  <div class="callout proof" style="margin-top:6mm"><span class="label">交付清单</span>代码仓库 + README + 技术文档 PDF + 8 分钟演示视频 + 在线演示地址 + 演示数据（app.db 与 24 个 PDF）+ 107 条测试。</div>
+  <div class="foot"><span>08 总结与展望</span><span class="no">P22</span></div>
+</section>
+
+<!-- ================= P23 附录 ================= -->
+<section class="sheet">
+  <h2>附录</h2>
+  <h3>A. 主要 API（节选）</h3>
+  <table class="tbl">
+    <tr><th style="width:36%">接口</th><th>说明</th></tr>
+    <tr><td><code>GET/POST /api/papers</code></td><td>列表 / 上传（解析、去重、索引）</td></tr>
+    <tr><td><code>GET /api/papers/{id}/chunks</code></td><td>阅读器分页切片（含 bbox）</td></tr>
+    <tr><td><code>GET /api/papers/{id}/figures</code><br><code>GET /api/papers/{id}/figures/{n}/image</code></td><td>图表列表 / 按需裁切 PNG（内联展示禁用 OCR）</td></tr>
+    <tr><td><code>GET /api/papers/{id}/export</code></td><td>Markdown / HTML 导出（可附中文译文）</td></tr>
+    <tr><td><code>POST /api/chat</code></td><td>RAG 问答（证据、置信度、拒答、图表通道）</td></tr>
+    <tr><td><code>POST /api/compare</code></td><td>多论文多维对比</td></tr>
+    <tr><td><code>GET /api/graph</code></td><td>引用图谱 + PageRank 分层（缓存）</td></tr>
+    <tr><td><code>GET /api/future</code></td><td>Future Work 抽取与 open/resolved</td></tr>
+    <tr><td><code>POST /api/survey</code></td><td>领域综述（llm / offline，引用校验）</td></tr>
+    <tr><td><code>POST /api/translate</code></td><td>段落 / 整篇翻译（target=en）</td></tr>
+    <tr><td><code>POST /api/copilot/{outline,diagram,csv}</code></td><td>框架 / 图表 / CSV 转图</td></tr>
+    <tr><td><code>POST /api/code/run</code></td><td>受限 Python 沙箱（stdout / 图片）</td></tr>
+    <tr><td><code>GET /api/insights/reproducibility</code><br><code>GET /api/insights/recommend</code></td><td>复现性评分 / 相关论文推荐</td></tr>
+    <tr><td><code>GET /api/papers/{id}/refs/quality</code><br><code>POST /api/papers/{id}/drill</code></td><td>引用含金量 / 批量下钻</td></tr>
+    <tr><td><code>GET /api/tracking</code> 等</td><td>arXiv 追踪、刷新、反馈、状态</td></tr>
+  </table>
+  <h3>B. 环境变量（模板）</h3>
+  <div class="card" style="font-size:8.2pt;font-family:Consolas,monospace;line-height:1.55">
+    LLM_BASE_URL=https://api.deepseek.com/v1<br>
+    LLM_API_KEY=&lt;通过环境变量注入，不写入仓库&gt;<br>
+    LLM_MODEL=deepseek-chat &nbsp; LLM_TEMPERATURE=0.2 &nbsp; LLM_TIMEOUT=120<br>
+    EMBEDDING_PROVIDER=hash &nbsp; EMBEDDING_DIM=384<br>
+    DATA_DIR=./data &nbsp; DB_PATH=./data/app.db<br>
+    CHUNK_SIZE=900 &nbsp; CHUNK_OVERLAP=120 &nbsp; RETRIEVE_TOP_K=8<br>
+    DUP_THRESHOLD=0.45 &nbsp; REF_MATCH_THRESHOLD=0.72<br>
+    OCR_ENABLED=1 &nbsp; OCR_LANG=ch<br>
+    CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+  </div>
+  <h3>C. 截图索引</h3>
+  <p class="small">01 文库 · 02 问答 · 03 阅读器 · 04 图谱 · 05 Copilot · 06 Agent · 06b 执行历史 · 07 版本比对 · 08 arXiv · 09 Python 沙箱 · 10 学术洞察 · 11 图表理解 · 12 移动端 · 13 双源检索 · 14 机构信息 · 15 内联图表。全部位于 <code>docs/screenshots/</code>。</p>
+  <div class="note">本技术文档共 23 页，满足赛题「PDF，不超过 30 页」要求。</div>
+  <div class="foot"><span>附录</span><span class="no">P23</span></div>
+</section>
+
+</body>
+</html>
