@@ -138,3 +138,164 @@ def test_translate_drops_output_when_all_fallbacks_degenerate(monkeypatch):
 def test_translate_returns_none_when_model_unavailable(monkeypatch):
     monkeypatch.setattr(nmt, "_ensure_model", lambda: False)
     assert nmt.translate(["hello"]) is None
+
+
+# ---------- is_degenerate 边界阈值 ----------
+
+def test_degenerate_exactly_at_repeat_threshold():
+    """正则 (.)\\1{5,} 要求：捕获一个字符 + 再重复 ≥5 次 → 总共 ≥6 个连续相同字符。"""
+    assert nmt.is_degenerate("some source", "伊" * 6)
+
+
+def test_not_degenerate_below_repeat_threshold():
+    """5 个连续（1+4）还没到 {5,} 的 6 个阈值，不算退化。"""
+    assert not nmt.is_degenerate("some source", "伊" * 5)
+
+
+def test_degenerate_length_exactly_at_boundary():
+    """长度刚好等于 max(80, len(src)*3) 不算退化，必须严格大于。用乱码避免被重复 ngram 规则误判。"""
+    src = "abc" * 30  # 90 字符，len*3 = 270
+    # pool 有 21 个字符：21*13=273，截到 270
+    pool = "的一是在了不和有大这主中人上们为被以我动他"
+    out = (pool * 13)[:270]
+    assert len(out) == 270
+    assert not nmt.is_degenerate(src, out)
+
+
+def test_degenerate_length_strictly_above_is_degenerate():
+    """长度严格大于阈值才算退化。"""
+    src = "abc" * 30  # 90，阈值 270
+    pool = "的一是在了不和有大这主中人上们为被以我动他"
+    out = (pool * 14)[:271]  # 271 > 270
+    assert nmt.is_degenerate(src, out)
+
+
+# ---------- looks_like_name_list 边界 ----------
+
+def test_name_list_below_min_parts_not_detected():
+    """少于 12 段直接返回 False，哪怕全是短片段。"""
+    src = ", ".join(["Alice Smith"] * 11)  # 11 段，不够 12
+    assert not nmt.looks_like_name_list(src)
+
+
+def test_name_list_short_ratio_below_threshold():
+    """短片段占比 < 0.8 不算列表。"""
+    short_parts = ["Alice Smith"] * 9   # 9 段短
+    long_part = ("this is a perfectly normal sentence with many words in it "
+                 "to dilute the short fragment ratio")  # 1 段长
+    src = ", ".join(short_parts + [long_part])  # 10 短 / 11 总 ≈ 0.82，哦不行
+    # 换成精确一点：12 段里 9 短 3 长 → 9/12 = 0.75 < 0.8
+    src = ", ".join(short_parts + [long_part] * 3)
+    assert len([p for p in src.split(",") if p.strip()]) >= 12
+    assert not nmt.looks_like_name_list(src)
+
+
+# ---------- _translate_prose 边界 ----------
+
+def test_prose_too_short_after_cut_returns_empty(monkeypatch):
+    """正文只有 3 个词（cut 后 prose.split() < 5）→ 返回空串，不丢给模型。"""
+    _patch_model(monkeypatch)
+    called = []
+    monkeypatch.setattr(nmt, "_generate",
+                        lambda tok, mdl, texts, penalty, no_repeat:
+                        called.append(texts) or ["whatever" for _ in texts])
+    # 正文极短 + 后面跟着一长串名单
+    src = ("To my family: Alice Smith, Bob Jones, Carol White, Dave Brown, "
+           "Eve Green, Frank Black, Grace Hall, Henry King, Ivy Lee, Jack Ma, "
+           "Kate Ng, Leo Park")
+    assert nmt.looks_like_name_list(src)
+    out = nmt.translate([src])[0]
+    assert out == "", f"短正文应返回空串，实际：{out!r}"
+    assert called == [], "短正文不应进入模型生成"
+
+
+def test_prose_no_name_detected_translates_entire_head(monkeypatch):
+    """正文根本不像列表（cut=len(parts)），冒号前整段都送去翻译。"""
+    _patch_model(monkeypatch)
+    seen = []
+
+    def fake_generate(tok, mdl, texts, penalty, no_repeat):
+        seen.extend(texts)
+        return ["完整正文译文。" for _ in texts]
+
+    monkeypatch.setattr(nmt, "_generate", fake_generate)
+    src = "We present a novel attention mechanism, which is both efficient and accurate: Appendix follows."
+    # 这个 src 看起来不像列表（parts 少且句子长）
+    assert not nmt.looks_like_name_list(src)
+    # 但它会走 usable 路径（不是 namey），直接进 _generate 批量
+    out = nmt.translate([src])[0]
+    assert "完整正文译文" in out
+
+
+# ---------- translate 兜底：重试成功分支 ----------
+
+def test_translate_retry_with_stronger_penalty_succeeds(monkeypatch):
+    """首次生成退化 → 加强 penalty 后成功，不再走切段兜底。"""
+    _patch_model(monkeypatch)
+    attempts = []
+
+    def fake_generate(tok, mdl, texts, penalty, no_repeat):
+        p = max(len(t) for t in texts)
+        attempts.append(penalty)
+        # 第一次（penalty=1.25）：长串退化；第二次（penalty=1.6）：成功
+        if penalty < 1.5:
+            return ["伊" * 90 for _ in texts]
+        return ["正常译文" for _ in texts]
+
+    monkeypatch.setattr(nmt, "_generate", fake_generate)
+    out = nmt.translate(["This is a test paragraph for retry logic."])
+    assert out == ["正常译文"]
+    assert 1.25 in attempts and 1.6 in attempts, "应出现两次 generate 调用（原 + 重试）"
+
+
+# ---------- _translate_segments 边界 ----------
+
+def test_segments_too_few_parts_returns_empty(monkeypatch):
+    """切段后不足 2 段 → 返回空串。"""
+    _patch_model(monkeypatch)
+    # 直接调用内部函数测边界（translate 主函数走 usable 批量，这里测内部）
+    tok, mdl = nmt._state["tok"], nmt._state["mdl"]
+    # 只有一个逗号且前后都没内容的极端情况
+    assert nmt._translate_segments(tok, mdl, "single chunk here") == ""
+
+
+# ---------- 术语修正 _fix_terms ----------
+
+def test_translate_applies_term_fix(monkeypatch):
+    """模型常译错的 AI 术语（如「点产品关注」）会被替换回正确译法。"""
+    _patch_model(monkeypatch)
+
+    def fake_generate(tok, mdl, texts, penalty, no_repeat):
+        return ["该点产品关注机制提升了性能。" for _ in texts]
+
+    monkeypatch.setattr(nmt, "_generate", fake_generate)
+    out = nmt.translate(["The dot-product attention improves performance."])
+    assert out == ["该点积注意力机制提升了性能。"]
+
+
+# ---------- translate 混合 batch ----------
+
+def test_translate_mixed_batch_namey_and_usable(monkeypatch):
+    """一个 batch 同时含列表型段落和普通段落，两类各自走对应路径。"""
+    _patch_model(monkeypatch)
+    calls = []
+
+    def fake_generate(tok, mdl, texts, penalty, no_repeat):
+        calls.append(list(texts))
+        return ["译文。" for _ in texts]
+
+    monkeypatch.setattr(nmt, "_generate", fake_generate)
+    normal = "We propose a new attention mechanism for transformers."
+    listy = ("Writing this book would not have been possible: Alice Smith, Bob Jones, "
+             "Carol White, Dave Brown, Eve Green, Frank Black, Grace Hall, Henry King, "
+             "Ivy Lee, Jack Ma, Kate Ng, Leo Park, Mona Ray")
+    out = nmt.translate([normal, listy])
+    assert out == ["译文。", "译文。"]
+    # 应发生两次 generate：namey 的 prose（先处理）+ usable 的批量（后处理）
+    # namey 循环在 usable 批量之前
+    assert len(calls) == 2, f"expected 2 generate calls, got {len(calls)}"
+    all_texts = [t for call in calls for t in call]
+    # 所有 generate 输入中应包含 normal 的完整内容（无截断）
+    assert any("attention mechanism" in t for t in all_texts)
+    # 但不应包含 "Alice Smith"（prose 路径已在冒号处截断名单）
+    assert all("Alice Smith" not in t for t in all_texts)
