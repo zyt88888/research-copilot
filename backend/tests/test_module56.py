@@ -57,7 +57,9 @@ def seed(lib) -> list[str]:
         "p1", "Attention Is All You Need",
         "We propose the Transformer, a model based entirely on attention mechanisms.",
         2017,
-        chunks=[("Introduction", "paragraph",
+        chunks=[("Front", "paragraph",
+                 "Google Research, Mountain View, CA, USA"),
+                ("Introduction", "paragraph",
                  "The Transformer replaces recurrence with self-attention."),
                 ("Limitations", "paragraph",
                  "Future work should extend the Transformer to long documents and "
@@ -123,6 +125,22 @@ def test_diagram_graphviz_and_matplotlib_offline(lib):
     assert "import matplotlib" in py["code"]
     assert "pipeline.png" in py["code"]
     assert "FancyBboxPatch" in py["code"]
+
+
+def test_affiliations_and_figure_listing(lib):
+    seed(lib)
+    db.execute("INSERT OR REPLACE INTO chunks(id,paper_id,page,bbox,section,level,kind,text,seq) "
+               "VALUES(?,?,?,?,?,?,?,?,?)",
+               ("p1:fig1", "p1", 2, "[10,10,300,200]", "Results", 0,
+                "figure", "Figure 1: Sparse attention pattern.", 99))
+    store.bump_version()
+    aff = store.affiliations_of("p1")
+    assert any("Google Research" in a for a in aff)
+    from app.api import papers
+    figs = papers.list_figures("p1")
+    assert figs["total"] == 1
+    assert figs["figures"][0]["n"] == 1
+    assert "Sparse attention" in figs["figures"][0]["caption"]
 
 
 def test_export_markdown_and_html_with_cached_translation(lib):

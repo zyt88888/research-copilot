@@ -58,8 +58,11 @@ def locate(paper_id: str, n: int) -> dict | None:
     return plain[n - 1] if len(plain) >= n else None
 
 
-def render(paper_id: str, n: int) -> dict | None:
-    """裁剪渲染第 n 张图，返回图注/页码/图片 URL/上下文/图内 OCR 文本。"""
+def render(paper_id: str, n: int, with_ocr: bool = True) -> dict | None:
+    """裁剪渲染第 n 张图，返回图注/页码/图片 URL/上下文/图内 OCR 文本。
+
+    with_ocr=False 用于阅读器内联展示：只裁图，避免批量 OCR 占用内存。
+    """
     meta = paper_meta(paper_id)
     if not meta:
         return None
@@ -99,11 +102,12 @@ def render(paper_id: str, n: int) -> dict | None:
 
     # 图内文字 OCR（可选）：无文本层的扫描图也能读出坐标轴与标注
     ocr_text = ""
-    try:
-        from .pdf_parser import ocr_image  # 延迟导入，避免无 OCR 环境报错
-        ocr_text = snippet(ocr_image(out) or "", 300)
-    except Exception:
-        ocr_text = ""
+    if with_ocr:
+        try:
+            from .pdf_parser import ocr_image  # 延迟导入，避免无 OCR 环境报错
+            ocr_text = snippet(ocr_image(out) or "", 300)
+        except Exception:
+            ocr_text = ""
 
     return {"n": n, "page": page_no, "caption": snippet(caption, 400),
             "image_url": f"/api/figures/img/{out.name}",

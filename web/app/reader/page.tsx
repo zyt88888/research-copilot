@@ -7,8 +7,11 @@ import { Empty, ErrorState, Skeleton, SkeletonCard } from "../../components/Stat
 export const dynamic = "force-dynamic";
 
 type Chunk = { id: string; page: number; bbox: number[]; section: string; kind: string; text: string; seq: number; level?: number };
+const FIG_CAP_RE = /^\s*(?:figure|fig\.?)\s*(\d+)/i;
+
 type Meta = { id: string; title: string; authors: string[]; year: number | null; num_pages: number; abstract?: string;
-  venue?: string; page_flags?: Record<string, string>; toc?: { title: string; level: number; page: number }[] };
+  venue?: string; affiliations?: string[]; page_flags?: Record<string, string>;
+  toc?: { title: string; level: number; page: number }[] };
 
 export default function ReaderPage() {
   return (
@@ -335,13 +338,22 @@ function Inner() {
   if (!meta) return <SkeletonCard rows={7} label="正在载入论文…" />;
 
   // 连续滚动阅读：按 PDF 页码分组（仅保留有正文的分组），保留原始阅读顺序
-  const READ_KINDS = ["paragraph", "table", "ocr", "caption", "formula", "heading"];
+  const READ_KINDS = ["paragraph", "table", "ocr", "caption", "formula", "heading", "figure"];
   const docChunks = chunks.filter(c => READ_KINDS.includes(c.kind));
   const pageGroups: { page: number; items: Chunk[] }[] = [];
   for (const c of docChunks) {
     const last = pageGroups[pageGroups.length - 1];
     if (last && last.page === c.page) last.items.push(c);
     else pageGroups.push({ page: c.page, items: [c] });
+  }
+  // 图号：优先取图注中的 Figure N，否则按出现顺序编号（与后端裁剪定位一致）
+  const figureNo = new Map<string, number>();
+  let figSeq = 0;
+  for (const c of docChunks) {
+    if (c.kind !== "figure" && c.kind !== "caption") continue;
+    const m = (c.text || "").match(FIG_CAP_RE);
+    if (!m && c.kind === "caption") continue;
+    figureNo.set(c.id, m ? parseInt(m[1], 10) : ++figSeq);
   }
 
   /** 跳转到指定页：把滚动容器滚到该页锚点。 */
@@ -464,6 +476,11 @@ function Inner() {
         <div style={{ color: "var(--ink-3)", fontSize: 13 }}>
           {(meta.authors || []).join(", ")} · {meta.year || "n.d."} · {meta.venue || ""} · {meta.num_pages} 页
         </div>
+        {(meta.affiliations || []).length > 0 && (
+          <div style={{ color: "var(--ink-3)", fontSize: 12, marginTop: 3 }}>
+            🏛 {meta.affiliations.join("；")}
+          </div>
+        )}
         {meta.abstract && <p style={{ marginTop: 10, lineHeight: 1.7 }}>{meta.abstract}</p>}
         <div className="row grow" style={{ marginTop: 12 }}>
           <button className={`btn ghost ${lang === "zh" ? "chip" : ""}`}
@@ -807,10 +824,28 @@ function Inner() {
                   {c.kind === "heading" && <h3 style={{ fontSize: 16, margin: "8px 0 4px" }}>
                     {c.level >= 1 ? "▶ " : ""}{c.text}</h3>}
                   {c.kind === "table" && <TableBlock text={c.text} />}
+                  {(c.kind === "figure" || (c.kind === "caption" && FIG_CAP_RE.test(c.text))) && (
+                    <figure style={{ margin: "10px 0" }}>
+                      <img
+                        src={`${apiBase()}/api/papers/${pid}/figures/${figureNo.get(c.id)}/image`}
+                        alt={c.text || "figure"}
+                        loading="lazy"
+                        style={{ maxWidth: "100%", border: "1px solid var(--line)", borderRadius: 6 }}
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "0.25"; }}
+                      />
+                      {c.text && c.text !== "[Figure]" && (
+                        <figcaption style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>
+                          图 {figureNo.get(c.id)}：{c.text}
+                        </figcaption>
+                      )}
+                    </figure>
+                  )}
                   {c.kind === "formula" && <div style={{ fontFamily: "ui-monospace, monospace",
                     fontSize: 13, background: "#f8fafc", padding: 6, borderRadius: 6 }}>{c.text}</div>}
-                  {c.kind === "caption" && <div style={{ fontStyle: "italic", fontSize: 13, color: "var(--ink-3)" }}>
-                    {c.text}</div>}
+                  {c.kind === "caption" && !FIG_CAP_RE.test(c.text) && (
+                    <div style={{ fontStyle: "italic", fontSize: 13, color: "var(--ink-3)" }}>
+                      {c.text}</div>
+                  )}
                   {(c.kind === "paragraph" || c.kind === "ocr") && (
                     <p style={{ margin: 0 }}
                       onMouseEnter={(e) => hoverTranslate(c, e)}

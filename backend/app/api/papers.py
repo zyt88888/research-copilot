@@ -17,7 +17,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from ..settings import UPLOAD_DIR
-from ..services import (citation_quality, dedup, drill, jobs, parse_worker,
+from ..services import (citation_quality, dedup, drill, figures, jobs, parse_worker,
                         pdf_parser, store)
 
 router = APIRouter(prefix="/api/papers", tags=["papers"])
@@ -101,7 +101,39 @@ def get_paper(paper_id: str):
     meta = store.paper_meta(paper_id)
     if not meta:
         raise HTTPException(status_code=404, detail="paper not found")
+    # 机构信息由首页文本按关键词保守抽取（扫描件用 OCR 文本），不编造
+    meta["affiliations"] = store.affiliations_of(paper_id)
     return meta
+
+
+@router.get("/{paper_id}/figures")
+def list_figures(paper_id: str, limit: int = 40):
+    """列出论文中的图块（页码 + 图注），图片按需裁切。"""
+    figs = [c for c in store.chunks_of(paper_id, ("figure",))]
+    if not figs:
+        # 老库没有 figure 块时退化为图注块（可据此向上裁切图像区域）
+        figs = [c for c in store.chunks_of(paper_id, ("caption",))
+                if re.match(r"(?i)^\s*(?:figure|fig\.?)\s*\d+", c.get("text") or "")]
+    out = []
+    for i, c in enumerate(figs[:max(1, limit)]):
+        m = re.match(r"(?i)^\s*(?:figure|fig\.?)\s*(\d+)", c.get("text") or "")
+        out.append({"n": int(m.group(1)) if m else i + 1,
+                    "page": c.get("page"),
+                    "caption": "" if c.get("text") == "[Figure]" else (c.get("text") or "")})
+    return {"paper_id": paper_id, "figures": out, "total": len(figs)}
+
+
+@router.get("/{paper_id}/figures/{n}/image")
+def figure_image(paper_id: str, n: int):
+    """按需裁切第 n 张图并返回 PNG（同一图只裁一次，落盘缓存）。"""
+    r = figures.render(paper_id, n, with_ocr=False)
+    if not r or not r.get("image_url"):
+        raise HTTPException(status_code=404, detail=r.get("error") if r else "figure not found")
+    from ..services.figures import FIG_DIR
+    path = FIG_DIR / f"{paper_id}_fig{n}.png"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="图像裁切失败")
+    return FileResponse(str(path), media_type="image/png")
 
 
 @router.get("/{paper_id}/export")

@@ -130,6 +130,7 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [batchMsg, setBatchMsg] = useState<string | null>(null);
   const [job, setJob] = useState<any>(null);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const [uploadDone, setUploadDone] = useState<string | null>(null);  // 完成提示
@@ -261,8 +262,69 @@ export default function LibraryPage() {
     } finally { setDeleting(false); }
   }
 
+  // 批量上传：逐篇串行解析，重复项自动跳过并汇总建议，避免弹出 N 次确认框
+  async function handleBatch(list: File[]) {
+    setUploading(true); setDup(null); setDiff(null); setUploadErr(null);
+    setJob(null); setUploadDone(null);
+    let ok = 0, dupCount = 0, ocr = 0, fail = 0;
+    let dupNote = "";
+    const failures: string[] = [];
+    for (let i = 0; i < list.length; i++) {
+      setBatchMsg(`批量上传 ${i + 1}/${list.length}：${list[i].name}`);
+      const fd = new FormData();
+      fd.append("file", list[i]);
+      try {
+        const r = await fetch(`${apiBase()}/api/papers/upload`, { method: "POST", body: fd });
+        const j = await r.json();
+        if (!r.ok) {
+          fail++; failures.push(`${list[i].name}: ${j.detail || `HTTP ${r.status}`}`);
+          continue;
+        }
+        if (j.status === "ok") { ok++; continue; }
+        if (j.status === "duplicate") {
+          dupCount++; dupNote = j.suggestion || j.duplicate?.suggestion || dupNote;
+          continue;
+        }
+        if (!j.job_id) {
+          fail++; failures.push(`${list[i].name}: ${j.detail || "未知错误"}`);
+          continue;
+        }
+        let last: any = null;
+        for (let k = 0; k < 1800; k++) {
+          await new Promise(res => setTimeout(res, 800));
+          const jr = await fetch(`${apiBase()}/api/papers/jobs/${j.job_id}`);
+          if (!jr.ok) break;
+          last = await jr.json();
+          if (last.status !== "parsing" && last.status !== "queued") break;
+        }
+        if (last?.status === "done") {
+          ok++;
+          if (last.result?.ocr_pages) ocr++;
+        } else if (last?.status === "duplicate") {
+          dupCount++; dupNote = last.suggestion || last.duplicate?.suggestion || dupNote;
+        } else if (last?.status === "error") {
+          fail++; failures.push(`${list[i].name}: ${last.message || "解析失败"}`);
+        } else {
+          fail++; failures.push(`${list[i].name}: 解析超时（后台仍在继续）`);
+        }
+      } catch (e) {
+        fail++; failures.push(`${list[i].name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    await refresh(true);
+    setBatchMsg(null);
+    setUploadDone(
+      `批量上传完成：入库 ${ok} 篇 · 重复跳过 ${dupCount} 篇` +
+      (dupNote ? `（${dupNote}）` : dupCount ? "（建议保留最新版本）" : "") +
+      (ocr ? ` · OCR ${ocr} 篇` : "") + (fail ? ` · 失败 ${fail} 篇` : ""));
+    if (failures.length) setUploadErr(failures.slice(0, 5).join("；"));
+    setUploading(false);
+    setTimeout(() => setUploadDone(null), 12000);
+  }
+
   async function handleFiles(files: FileList | null) {
     if (!files || !files.length) return;
+    if (files.length > 1) { await handleBatch(Array.from(files)); return; }
     setUploading(true); setDup(null); setDiff(null); setUploadErr(null); setJob(null);
     setUploadDone(null);
     try {
@@ -354,10 +416,13 @@ export default function LibraryPage() {
           onDrop={(e) => { e.preventDefault(); setDrag(false); handleFiles(e.dataTransfer.files); }}
           onClick={() => inputRef.current?.click()}
         >
-          📂 把 PDF 拖到这里，或点选文件
-          <input ref={inputRef} type="file" accept="application/pdf" hidden
-            onChange={(e) => handleFiles(e.target.files)} />
+          📂 把 PDF 拖到这里，或点选文件（支持一次选择多个批量上传）
+          <input ref={inputRef} type="file" accept="application/pdf" multiple hidden
+            onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} />
         </div>
+        {batchMsg && (
+          <div className="sk-label" style={{ marginTop: 10 }}>{batchMsg}</div>
+        )}
         {uploading && (
           <div style={{ marginTop: 12 }}>
             {job && job.pages_total > 0 ? (

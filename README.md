@@ -10,7 +10,8 @@ Lite 版零外部依赖即可启动（无 API Key 自动降级离线模式），
 
 | 模块 | 能力 | 关键实现 |
 |---|---|---|
-| PDF 解析 | 双栏还原、字号聚类标题、表格转 MD、公式与图注抽取、参考文献识别 | PyMuPDF + 版面规则，解析结果缓存 |
+| PDF 管理 | 单篇 / 批量上传（多选、拖拽、串行入库并汇总结果），基于内容的语义去重提示 | MinHash 指纹 + arXiv 系列判定；批量上传汇总「重复跳过 N 篇，建议保留最新版本」，失败条目逐条展示 |
+| PDF 解析 | 双栏还原、字号聚类标题树、标题/作者/机构、表格转 MD、公式与图注抽取、参考文献识别、阅读器内联原图 | PyMuPDF + 版面规则，解析结果缓存；机构信息优先取原 PDF 首页文本（OCR 回退），图表按 bbox 2× 裁剪后懒加载 |
 | 语义去重 | 同一论文不同版本的自动归并与差异比对 | 64-permutation MinHash + shingle(5)，`DUP_THRESHOLD=0.45`，arXiv 底号强关联 |
 | 抗幻觉 RAG | 检索 → 证据约束作答 → 引用校验 | BM25 + 稠密向量 + RRF；低置信拒答；生成后剔除无依据引用 |
 | 翻译 | 全文/段落翻译，中英对照阅读（左右双栏 + 同步滚动）、划词/悬停翻译 | 公式、代码块、URL、`[12]` 引用做占位符保护 |
@@ -126,13 +127,15 @@ Docker 运行时，`docker-compose.yml` 会把 `DATA_DIR=/app/data`、`DB_PATH=/
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/health` | 健康检查，返回 `llm` / `embedding` 状态 |
-| GET/POST | `/api/papers` | 论文列表 / 上传 PDF（自动解析、去重、建索引） |
+| GET/POST | `/api/papers` | 论文列表 / 上传 PDF（自动解析、去重、建索引；批量上传由前端串行调用并汇总结果） |
 | GET | `/api/papers/discover?source=arxiv\|s2\|both` | arXiv / Semantic Scholar 双源在线检索 |
 | POST | `/api/papers/fetch-arxiv` | 按 arXiv id 下载 PDF 并入库（`exists` / `duplicate` / `ok` 三种状态） |
 | DELETE | `/api/papers/{id}` | 删除论文及其切片、引用 |
 | GET | `/api/papers/{id}/chunks` | 阅读器分页切片（含 bbox） |
 | GET | `/api/papers/{id}/export?format=md\|html&lang=both` | 整篇导出 Markdown / HTML，可附加已缓存中文译文 |
 | GET | `/api/papers/{id}/pdf` | 下载原始 PDF（保持原版式） |
+| GET | `/api/papers/{id}/figures?limit=40` | 图文列表：图号 / 页码 / 图注（无 figure 块时退化为编号图注） |
+| GET | `/api/papers/{id}/figures/{n}/image` | 按需裁切第 N 张图为 PNG（阅读器内联展示，禁用 OCR 避免内存峰值） |
 | POST | `/api/chat` | RAG 问答（返回 sources / 置信度 / mode；`hierarchical=true` 走长文档分层检索；问「图 N」自动走图表理解通道） |
 | GET | `/api/figures/{paper_id}/{n}?q=` | 定位第 N 张图：图注 + 裁剪原图 + 图内 OCR 文字 |
 | GET | `/api/figures/img/{name}` | 图表裁剪产物（文件名白名单校验） |
@@ -273,6 +276,8 @@ GitHub API 结果缓存 600 秒；未配置网络或仓库无法访问时 `found
 2. PyMuPDF 按 bbox 外扩裁剪，2× 渲染 PNG（经 `/api/figures/img/...` 提供，文件名白名单防目录穿越）；
 3. PaddleOCR 识别图内文字（坐标轴、图例），与图注、同页正文一起作为作答唯一依据；
 4. 问答页直接渲染裁剪原图 + 解释 + 图内识别文字，并附页码溯源。
+
+阅读器另提供图表内联：`GET /api/papers/{id}/figures` 列出图号/页码/图注，正文中的图注块按图号懒加载 `/api/papers/{id}/figures/{n}/image` 原图；该接口以 `with_ocr=False` 裁图，避免批量打开论文时反复触发 OCR 造成内存峰值，问答通道仍保留 OCR 作为作答依据。
 
 PDF 路径按「原路径 → DATA_DIR 相对 → uploads 多模式回退」解析，容器与换机场景均可定位原文件。
 

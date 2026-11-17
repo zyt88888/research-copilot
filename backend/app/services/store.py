@@ -639,3 +639,68 @@ def _mark_enrich_failed(paper_id: str, reason: str) -> None:
         old["enriched_reason"] = reason[:200]
         conn.execute("UPDATE papers SET meta=? WHERE id=?",
                      (json.dumps(old, ensure_ascii=False), paper_id))
+
+
+_AFFIL_RE = re.compile(
+    r"(?i)(universit|institut|laborator|department|school of|college|academy|"
+    r"google|microsoft|meta ai|deepmind|openai|nvidia|ibm|tencent|alibaba|"
+    r"bytedance|baidu|huawei|research)")
+_EMAIL_RE = re.compile(r"\S+@\S+")
+_affil_cache: dict[str, list[str]] = {}
+
+
+def affiliations_of(paper_id: str, limit: int = 6) -> list[str]:
+    """从首页保守抽取作者机构：只认含机构关键词的行，去掉邮箱。
+
+    优先用已解析切片；解析器丢弃作者块时，退回原始 PDF 首页文本（标题到
+    Abstract 之间）。扫描件且无文本层时返回空列表，不用 LLM 猜测。
+    """
+    if paper_id in _affil_cache:
+        return _affil_cache[paper_id]
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def take(text: str) -> bool:
+        text = _EMAIL_RE.sub("", text or "").strip(" ,;*†‡")
+        text = re.sub(r"\s+", " ", text)
+        if not 6 <= len(text) <= 200 or not _AFFIL_RE.search(text):
+            return False
+        if re.match(r"(?i)^arxiv", text) or text in seen:
+            return False
+        seen.add(text)
+        out.append(text)
+        return len(out) >= limit
+
+    # 原始 PDF 首页（标题→Abstract）最干净，优先使用
+    meta = paper_meta(paper_id)
+    path = resolve_pdf_path(meta) if meta else None
+    if path:
+        try:
+            import pymupdf
+            with pymupdf.open(path) as doc:
+                if len(doc):
+                    text = doc[0].get_text("text")
+                    head = re.split(r"(?im)^\s*(abstract|摘要)\b", text)[0]
+                    for line in head.splitlines():
+                        if take(line):
+                            break
+        except Exception:
+            pass
+
+    if not out:
+        # 扫描件走 OCR 切片兜底
+        rows = query(
+            "SELECT text,section FROM chunks WHERE paper_id=? AND page=1 "
+            "AND kind IN ('paragraph','ocr','heading') ORDER BY seq LIMIT 60",
+            (paper_id,))
+        for r in rows:
+            section = (r["section"] or "").lower()
+            if section.startswith(("introduction", "1 introduction", "引言")):
+                break
+            if section.startswith(("abstract", "摘要")):
+                continue  # 摘要里可能提到机构，但不算作者单位
+            if take(r["text"] or ""):
+                break
+
+    _affil_cache[paper_id] = out
+    return out
