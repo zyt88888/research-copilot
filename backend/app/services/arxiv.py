@@ -60,7 +60,13 @@ def search(query: str, limit: int = 20, sort_by: str = "relevance") -> list[dict
 
     sort_by="submittedDate" 时按投稿时间倒序，用于「抓取最新论文」。
     """
-    resp = _get(API, {"search_query": f"all:{query}", "start": 0,
+    return search_raw(f"all:{query}", limit=limit, sort_by=sort_by)
+
+
+def search_raw(search_query: str, limit: int = 20,
+               sort_by: str = "relevance") -> list[dict]:
+    """直接使用 arXiv 查询语法（支持 ti:/abs:/all: 与 OR），供主题追踪复用。"""
+    resp = _get(API, {"search_query": search_query, "start": 0,
                       "max_results": max(1, min(limit, 50)),
                       "sortBy": sort_by, "sortOrder": "descending"})
     root = ET.fromstring(resp.text)

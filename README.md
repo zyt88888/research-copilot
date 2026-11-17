@@ -22,8 +22,10 @@ Lite 版零外部依赖即可启动（无 API Key 自动降级离线模式），
 | 版本比对 | 同一 arXiv 系列两版的差异 | 正文重合度 + 章节增删 + 可选 LLM 多维对比，独立 `/compare` 页 |
 | 元数据补全 | 上传后自动补全题录 | 后台线程调 arXiv metadata 补 title/authors/year/abstract，失败降级不阻塞上传 |
 | 论文检索 | arXiv / Semantic Scholar 双源关键词检索与一键入库 | 双源合并去重、S2 限流退避 + 结果缓存，单源失败不拖垮另一源 |
+| 参考文献下钻 | 按论文名称或参考文献列表自动检索并下载入库 | 引用含金量打分（正文提及 + 语义线索 + 章节位置），默认剔除应付式引用；标题相似度 ≥0.55 才入库；后台任务可查进度 |
+| arXiv 动态追踪 | 从本地库提炼主题 → 定时抓最新论文 → 相关度排序 → 推荐理由 / 点赞踩 | 进程内调度 + SQLite 租约（多 worker 不重复执行）；开源代码优先；`feedback` 表按用户画像重排 |
 
-前端 7 个页面：文库 / 问答 / 阅读器（含划词翻译、证据 bbox 高亮）/ 图谱（力导向交互）/ 写作 Copilot / Agent（执行 + 历史）/ 版本比对。
+前端 8 个页面：文库 / 追踪推荐 / 问答 / 阅读器（含划词翻译、证据 bbox 高亮）/ 图谱（力导向交互）/ 写作 Copilot / Agent（执行 + 历史）/ 版本比对。
 统一空态 / 错误态 / 骨架屏组件（`web/components/State.tsx`）；≤768px 移动端适配：导航横向滑动、卡片单列、图谱画布横向拖看、划词浮层宽度自适应。
 
 ---
@@ -35,7 +37,7 @@ research-copilot/
 ├── backend/
 │   ├── app/
 │   │   ├── api/            # papers.py / chat.py（问答、比对、Agent 执行历史）
-│   │   ├── services/       # pdf_parser, dedup, store, rag, translate, graph, copilot, agent, arxiv, scholar, figures, insights, codeexec, enrich, llm, embeddings
+│   │   ├── services/       # pdf_parser, dedup, store, rag, translate, graph, copilot, agent, arxiv, scholar, figures, insights, codeexec, enrich, llm, embeddings, citation_quality, drill, tracking
 │   │   ├── main.py         # FastAPI 入口（app.main:app）
 │   │   ├── db.py           # SQLite（WAL，无 ORM）
 │   │   └── settings.py     # 环境变量
@@ -44,7 +46,7 @@ research-copilot/
 │   ├── requirements.txt
 │   └── .env.example
 ├── web/                    # Next.js 14 App Router + TypeScript
-│   ├── app/                # page.tsx / chat / reader / graph / copilot / agent / compare
+│   ├── app/                # page.tsx / track / chat / reader / graph / copilot / agent / compare
 │   └── components/         # State.tsx（统一空态 / 错误态 / 骨架屏）
 ├── data/                   # SQLite 与 PDF（Docker 时挂载到 /app/data）
 ├── docker-compose.yml
@@ -110,6 +112,10 @@ Windows 可直接双击 `启动.bat` 与 `启动前端.bat`。
 | `RETRIEVE_TOP_K` | 检索条数 | `8` |
 | `OCR_ENABLED` / `OCR_LANG` | 扫描件 OCR | `1` / `ch` |
 | `S2_API_KEY` | Semantic Scholar Graph API 提额（可空） | 空 |
+| `TRACKING_ENABLED` | 是否开启 arXiv 定时追踪 | `1` |
+| `TRACKING_INTERVAL_HOURS` | 追踪刷新周期（小时） | `6` |
+| `TRACKING_LIMIT_PER_QUERY` | 每条主题查询抓取条数 | `12` |
+| `TRACKING_MAX_ITEMS` | 单次刷新最多保留候选数 | `40` |
 
 Docker 运行时，`docker-compose.yml` 会把 `DATA_DIR=/app/data`、`DB_PATH=/app/data/app.db` 覆盖进容器，避免读到宿主机的绝对路径。
 
@@ -136,7 +142,16 @@ Docker 运行时，`docker-compose.yml` 会把 `DATA_DIR=/app/data`、`DB_PATH=/
 | POST | `/api/code/run` | 受限 Python 沙箱执行（返回 stdout / 图片产物） |
 | GET | `/api/code/artifact/{name}` | 读取沙箱产出的图片 |
 | GET | `/api/insights/reproducibility?paper_id=` | GitHub 仓库复现性评分（stars / License / 维护状态） |
-| GET | `/api/insights/recommend?paper_id=&top_k=5` | 按标题+摘要相似度推荐库内相关论文 |
+| GET | `/api/insights/recommend?paper_id=&top_k=5` | 库内相关论文推荐：混合检索召回 + 引用关系/共同作者/开源代码加权，附推荐理由 |
+| GET | `/api/papers/{id}/refs/quality` | 参考文献引用含金量打分（正文提及 / 语义线索 / 章节位置） |
+| POST | `/api/papers/{id}/drill` | 参考文献批量下钻（`limit` / `min_score` / `quality_filter` / `ref_ids`），返回后台任务 id |
+| GET | `/api/papers/drill-jobs/{job_id}` | 下钻任务进度与逐条结果 |
+| POST | `/api/papers/drill-title` | 按论文名称检索（标题相似度 ≥0.55）并下载入库 |
+| GET | `/api/tracking?user_id=` | arXiv 追踪推荐列表（相关度 + 代码加分 + 用户反馈重排） |
+| POST | `/api/tracking/refresh` | 立即抓取最新论文（不传 `queries` 则按本地库自动提炼主题） |
+| POST | `/api/tracking/feedback` | 点赞 / 踩 / 取消（`vote=1/-1/0`，多用户互不影响） |
+| GET | `/api/tracking/status` | 定时任务状态、上次运行、主题词与个人反馈统计 |
+| POST | `/api/tracking/{id}/add` | 把追踪到的 arXiv 论文下载并入库 |
 | POST | `/api/agent/run` | Agent SSE 流：`start → plan → step_start → tool_result → token → final` |
 | GET | `/api/agent/runs?limit=30` | 执行历史列表（状态 / 耗时 / 摘要） |
 | GET/DELETE | `/api/agent/runs/{run_id}` | 回放单次 trace 与最终答案 / 删除记录 |
@@ -265,6 +280,24 @@ PDF 路径按「原路径 → DATA_DIR 相对 → uploads 多模式回退」解�
 - S2 无 Key 共享配额有限，客户端做 5/15/30s 指数退避 + 300 秒结果缓存；可配 `S2_API_KEY` 提额；
 - `source=both` 时单源失败只进 `partial_errors`，不拖垮另一源；
 - 无 arXiv id 的 S2 结果暂不可一键入库（无公开 PDF 直链），在候选卡上明确标注。
+
+---
+
+## 6.7 参考文献下钻与 arXiv 动态追踪（赛题模块四）
+
+**引用含金量**（`GET /api/papers/{id}/refs/quality`）：对每条参考文献统计
+
+1. 正文提及（数字引用标记 `[n]` + 标题关键词命中，排除参考文献块本身）；
+2. 上下文语义线索（提出/改进/采用/对比/启发/指出局限，中英文均可）；
+3. 引用章节位置（方法/实验 > 相关工作/引言）。
+
+加权得 0-100 分：≥60 高价值、30-59 一般、1-29 弱引用、0 为「仅列入参考文献、正文零提及」的应付式引用。
+`POST /api/papers/{id}/drill` 默认只下钻 ≥30 分的文献，逐条解析 arXiv id → 下载解析入库，进度可通过任务 id 轮询。
+演示库实测：T5 论文 27 条参考文献分析耗时 **1.5 s**，识别高价值 3 条、一般 8 条、弱引用 11 条、应付式 5 条。
+
+**arXiv 动态追踪**（`/track` 页）：从本地库标题/摘要提炼 3 组主题词 → arXiv 按投稿时间倒序检索 → 与库内每篇论文算词面覆盖 + 向量相似度（0.75/0.25）→ 给出可核实理由（最相近的库内论文、共同作者、开源仓库、投稿时间）→ 点赞/踩写入 `feedback` 表并按用户画像重排。
+演示库 23 篇实测：3 组主题、单次抓取 22 篇最新论文约 **18 s**；附带 GitHub 仓库的论文有 0.18 推荐加分，排在同等相关度论文之前。
+定时刷新默认 6 小时一次，用 SQLite 租约保证 2 个 uvicorn worker 同一时刻只有一个真正执行；断网时失败只记录 `track_runs`，不影响在线功能。
 
 ---
 

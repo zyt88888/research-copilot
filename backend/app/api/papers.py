@@ -15,7 +15,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from ..settings import UPLOAD_DIR
-from ..services import dedup, jobs, parse_worker, pdf_parser, store
+from ..services import (citation_quality, dedup, drill, jobs, parse_worker,
+                        pdf_parser, store)
 
 router = APIRouter(prefix="/api/papers", tags=["papers"])
 
@@ -110,6 +111,45 @@ def get_chunks(paper_id: str, kinds: str | None = None):
 @router.get("/{paper_id}/refs")
 def get_refs(paper_id: str):
     return {"paper_id": paper_id, "refs": store.refs_of(paper_id)}
+
+
+@router.get("/{paper_id}/refs/quality")
+def refs_quality(paper_id: str):
+    """参考文献「引用含金量」：正文提及 + 语义线索 + 章节位置。"""
+    res = citation_quality.analyze(paper_id)
+    if res.get("error"):
+        raise HTTPException(status_code=404, detail=res["error"])
+    return res
+
+
+@router.post("/{paper_id}/drill")
+def drill_refs(paper_id: str, limit: int = Form(3), min_score: int = Form(30),
+               quality_filter: bool = Form(True), ref_ids: str = Form("")):
+    """按参考文献列表批量下钻下载：默认只抓含金量 >= 30 的高价值文献。"""
+    wanted = [int(x) for x in ref_ids.split(",") if x.strip().isdigit()] or None
+    res = drill.start(paper_id, limit=max(1, min(limit, 10)),
+                      min_score=max(0, min(min_score, 100)),
+                      quality_filter=quality_filter, ref_ids=wanted)
+    if res.get("error"):
+        raise HTTPException(status_code=404, detail=res["error"])
+    return res
+
+
+@router.get("/drill-jobs/{job_id}")
+def drill_job(job_id: str):
+    job = drill.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="下钻任务不存在或已过期")
+    return job
+
+
+@router.post("/drill-title")
+def drill_title(title: str = Form(...)):
+    """给定论文名称，自动检索、校验标题相似度并下载入库。"""
+    try:
+        return drill.drill_by_title(title)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/jobs/{job_id}")

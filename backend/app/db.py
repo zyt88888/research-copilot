@@ -74,10 +74,57 @@ CREATE TABLE IF NOT EXISTS graph_cache (
     data TEXT NOT NULL,
     updated_at TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS arxiv_tracks (
+    id TEXT PRIMARY KEY,
+    arxiv_id TEXT,
+    title TEXT NOT NULL,
+    summary TEXT,
+    authors TEXT DEFAULT '[]',
+    year INTEGER,
+    published TEXT,
+    pdf_url TEXT,
+    categories TEXT DEFAULT '[]',
+    comment TEXT,
+    code_repo TEXT,
+    code_stars INTEGER,
+    code_source TEXT,
+    relevance REAL DEFAULT 0,
+    reasons TEXT DEFAULT '[]',
+    topics TEXT DEFAULT '[]',
+    embedding BLOB,
+    status TEXT DEFAULT 'new',
+    paper_id TEXT,
+    fetched_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL DEFAULT 'default',
+    target_type TEXT NOT NULL DEFAULT 'track',
+    target_id TEXT NOT NULL,
+    vote INTEGER NOT NULL,
+    created_at TEXT DEFAULT '',
+    UNIQUE(user_id, target_type, target_id)
+);
+CREATE TABLE IF NOT EXISTS track_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT,
+    finished_at TEXT,
+    found INTEGER DEFAULT 0,
+    added INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'running',
+    message TEXT
+);
+CREATE TABLE IF NOT EXISTS scheduler_lease (
+    key TEXT PRIMARY KEY,
+    owner TEXT,
+    expires_at TEXT DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_chunks_paper ON chunks(paper_id, seq);
 CREATE INDEX IF NOT EXISTS idx_refs_paper ON refs(paper_id);
 CREATE INDEX IF NOT EXISTS idx_trans_chunk ON translations(chunk_id, lang);
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tracks_rel ON arxiv_tracks(relevance DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_target ON feedback(target_type, target_id);
 """
 
 

@@ -184,8 +184,36 @@ export default function LibraryPage() {
     } finally { setArxivBusy(false); }
   }
 
-  async function refresh(silent = false) {
-    if (!silent) setLoading(true);
+  /** 按论文名称直接下钻：arXiv 标题检索 + 相似度校验 + 下载入库。 */
+  async function drillByTitle() {
+    const q = arxivQ.trim();
+    if (!q) return;
+    setArxivBusy(true); setArxivMsg(null); setArxivCands(null);
+    try {
+      const fd = new FormData();
+      fd.append("title", q);
+      const r = await fetch(`${apiBase()}/api/papers/drill-title`, { method: "POST", body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || `下钻失败（HTTP ${r.status}）`);
+      if (j.status === "ok") {
+        setArxivMsg(`✅ 已按标题匹配入库：${j.title?.slice(0, 60)}（相似度 ${Math.round((j.similarity || 0) * 100)}%，${j.num_pages} 页，${j.refs_count} 条参考文献）`);
+        setArxivQ("");
+        await refresh(true);
+      } else if (j.status === "exists") {
+        setArxivMsg(`ℹ 库中已有这篇论文：${j.title?.slice(0, 60)}`);
+      } else if (j.status === "duplicate") {
+        setArxivMsg(`⚠ 内容与库内论文重复：${j.suggestion || ""}`);
+      } else if (j.status === "not_found") {
+        setArxivMsg(`未找到标题足够接近的论文（阈值 0.55）。可先点「检索」查看候选，再手动入库。`);
+      } else {
+        setArxivMsg(JSON.stringify(j).slice(0, 200));
+      }
+    } catch (e) {
+      setArxivMsg(e instanceof Error ? e.message : String(e));
+    } finally { setArxivBusy(false); }
+  }
+
+  async function refresh(silent = false) {    if (!silent) setLoading(true);
     setLoadErr(null);
     try {
       setPapers(await listPapers());
@@ -400,6 +428,12 @@ export default function LibraryPage() {
                   const m = arxivQ.match(/\d{4}\.\d{4,5}(v\d+)?/);
                   if (m) fetchArxiv(m[0]);
                 }}>↓ 直接入库</button>
+            )}
+            {!/\d{4}\.\d{4,5}/.test(arxivQ) && arxivQ.trim().length >= 8 && (
+              <button className="btn ghost" disabled={arxivBusy} onClick={drillByTitle}
+                title="按论文名称自动检索 arXiv，标题相似度 ≥ 0.55 才下载入库">
+                ⤓ 按标题入库
+              </button>
             )}
           </div>
           {arxivMsg && (

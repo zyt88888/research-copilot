@@ -43,6 +43,15 @@ function Inner() {
   const [repro, setRepro] = useState<any>(null);
   const [reco, setReco] = useState<any[] | null>(null);
   const [insightState, setInsightState] = useState<"loading" | "ok" | "fail">("loading");
+  // 参考文献含金量 + 批量下钻
+  const [refsTotal, setRefsTotal] = useState<number | null>(null);
+  const [refQ, setRefQ] = useState<any>(null);
+  const [refQBusy, setRefQBusy] = useState(false);
+  const [refQErr, setRefQErr] = useState<string | null>(null);
+  const [showAllRefs, setShowAllRefs] = useState(false);
+  const [drillJob, setDrillJob] = useState<any>(null);
+  const [drillMsg, setDrillMsg] = useState<string | null>(null);
+  const [drillBusy, setDrillBusy] = useState(false);
 
   // 连续滚动阅读：容器与各页锚点
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -123,8 +132,11 @@ function Inner() {
         if (!r.ok) throw new Error(`论文内容载入失败（HTTP ${r.status}）`);
         return r.json();
       }),
-    ]).then(([m, c]) => {
+      fetch(`${apiBase()}/api/papers/${pid}/refs`)
+        .then(r => (r.ok ? r.json() : { refs: [] })).catch(() => ({ refs: [] })),
+    ]).then(([m, c, rf]) => {
       setMeta(m); setChunks(c.chunks || []);
+      setRefsTotal((rf.refs || []).length);
       const p = Math.min(Math.max(wantPage || 1, 1), m.num_pages || 1);
       setPage(p - 1);
     }).catch(e => setErr(e instanceof Error ? e.message : String(e)));
@@ -247,6 +259,55 @@ function Inner() {
     tryFetch(1);
     return () => { alive = false; };
   }, [lang, pid, meta, page, chunks, transReloadKey]);
+
+  /** 参考文献含金量分析（正文提及 + 语义线索 + 章节位置）。 */
+  async function analyzeRefs() {
+    if (!pid) return;
+    setRefQBusy(true); setRefQErr(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/papers/${pid}/refs/quality`);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || `分析失败（HTTP ${r.status}）`);
+      setRefQ(j);
+    } catch (e) {
+      setRefQErr(e instanceof Error ? e.message : String(e));
+    } finally { setRefQBusy(false); }
+  }
+
+  /** 下钻下载：refIds 为空时按含金量批量挑高价值文献。 */
+  async function runDrill(refIds?: number[]) {
+    if (!pid) return;
+    setDrillBusy(true); setDrillMsg(null); setDrillJob(null);
+    try {
+      const fd = new FormData();
+      fd.append("limit", String(refIds?.length || 3));
+      fd.append("min_score", "30");
+      fd.append("quality_filter", refIds ? "false" : "true");
+      if (refIds) fd.append("ref_ids", refIds.join(","));
+      const r = await fetch(`${apiBase()}/api/papers/${pid}/drill`,
+        { method: "POST", body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || `下钻失败（HTTP ${r.status}）`);
+      if (!j.job_id) { setDrillMsg(j.message || "没有符合条件的参考文献"); return; }
+      let last: any = null;
+      for (let i = 0; i < 600; i++) {
+        await new Promise(res => setTimeout(res, 1000));
+        const jr = await fetch(`${apiBase()}/api/papers/drill-jobs/${j.job_id}`);
+        if (!jr.ok) throw new Error(`进度查询失败（HTTP ${jr.status}）`);
+        last = await jr.json();
+        setDrillJob(last);
+        if (last.status !== "running") break;
+      }
+      if (last?.status === "done") {
+        const ok = (last.items || []).filter((x: any) => x.status === "ok").length;
+        setDrillMsg(`${last.stage}${ok ? `（新入库 ${ok} 篇）` : ""}`);
+      } else if (last) {
+        setDrillMsg("下钻仍在后台进行，稍后回到文库刷新即可");
+      }
+    } catch (e) {
+      setDrillMsg(e instanceof Error ? e.message : String(e));
+    } finally { setDrillBusy(false); }
+  }
 
   if (!pid) return (
     <div className="card">
@@ -401,6 +462,118 @@ function Inner() {
           )}
         </section>
       )}
+
+      <section className="card">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0 }}>📚 参考文献含金量</h3>
+          <div className="row" style={{ gap: 8 }}>
+            {refsTotal != null && <span className="chip">{refsTotal} 条参考文献</span>}
+            <button className="btn ghost" disabled={refQBusy || refsTotal === 0}
+              onClick={analyzeRefs}>
+              {refQBusy ? "分析中…" : refQ ? "重新分析" : "分析含金量"}
+            </button>
+          </div>
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 8 }}>
+          按「正文提及次数 + 上下文语义线索 + 引用章节位置」打分，自动识别只在参考文献列表出现、
+          正文零提及的应付式引用；下钻时默认剔除这类文献。
+        </div>
+
+        {refQErr && (
+          <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "#fef2f2",
+            border: "1px solid #fecaca", fontSize: 12.5, color: "#991b1b" }}>{refQErr}</div>
+        )}
+
+        {refQ && (
+          <>
+            <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <span className="chip ok">高价值 {refQ.summary.high}</span>
+              <span className="chip">一般引用 {refQ.summary.medium}</span>
+              <span className="chip warn">弱引用 {refQ.summary.low}</span>
+              <span className="chip err">应付式 {refQ.summary.perfunctory}</span>
+              <button className="btn" style={{ marginLeft: "auto", padding: "6px 12px", fontSize: 12.5 }}
+                disabled={drillBusy} onClick={() => runDrill()}>
+                {drillBusy ? "下钻中…" : "⬇ 批量下钻高价值文献（最多 3 篇）"}
+              </button>
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 6 }}>
+              判定方法：{refQ.summary.method}
+            </div>
+
+            {drillMsg && (
+              <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "#eef2ff",
+                border: "1px solid #c7d2fe", fontSize: 12.5, color: "#3730a3" }}>{drillMsg}</div>
+            )}
+            {drillJob && (
+              <div style={{ marginTop: 10, padding: 10, border: "1px solid var(--line)",
+                borderRadius: 8 }}>
+                <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+                  {drillJob.status === "running"
+                    ? `${drillJob.stage} · ${drillJob.done}/${drillJob.total}`
+                    : drillJob.stage}
+                </div>
+                {(drillJob.items || []).map((it: any) => (
+                  <div key={it.ref_id ?? it.index} style={{ fontSize: 12, marginTop: 4 }}>
+                    <span className="chip" style={{ marginRight: 6 }}
+                      title={it.message}>{it.status === "ok" ? "已入库" :
+                        it.status === "exists" ? "库中已有" :
+                        it.status === "duplicate" ? "内容重复" :
+                        it.status === "not_found" ? "未检索到" : "失败"}</span>
+                    {(it.title || "").slice(0, 70)}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+              {(showAllRefs ? refQ.refs : refQ.refs.slice(0, 8)).map((r: any) => (
+                <div key={r.ref_id ?? r.index} style={{ padding: "8px 10px",
+                  border: "1px solid var(--line)", borderRadius: 8 }}>
+                  <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ fontSize: 13, minWidth: 0 }}>
+                      {r.index}. {r.title || (r.raw || "").slice(0, 90) || "（标题未能解析）"}
+                    </div>
+                    <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+                      <span className={`chip ${r.label === "高价值" ? "ok" :
+                        r.label === "应付式" ? "err" :
+                        r.label === "弱引用" ? "warn" : ""}`}>
+                        {r.label} · {r.score}
+                      </span>
+                      <button className="btn ghost" style={{ padding: "2px 8px", fontSize: 11.5 }}
+                        disabled={drillBusy || r.ref_id == null}
+                        onClick={() => runDrill([r.ref_id])}>下钻</button>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 4 }}>
+                    正文提及 {r.mentions} 处
+                    {r.sections?.length ? ` · ${r.sections.join("、")}` : ""}
+                    {r.cues?.length ? ` · 线索：${r.cues.join("、")}` : ""}
+                    {r.arxiv_id ? ` · arXiv:${r.arxiv_id}` : ""}
+                  </div>
+                  {r.evidence?.length > 0 && (
+                    <details style={{ marginTop: 4 }}>
+                      <summary style={{ fontSize: 11.5, cursor: "pointer", color: "var(--brand)" }}>
+                        查看正文证据
+                      </summary>
+                      {r.evidence.map((e: any, i: number) => (
+                        <div key={i} style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 4 }}>
+                          第 {e.page} 页 · {e.section || "正文"}：{e.snippet}
+                        </div>
+                      ))}
+                    </details>
+                  )}
+                </div>
+              ))}
+            </div>
+            {refQ.refs.length > 8 && (
+              <button className="btn ghost" style={{ marginTop: 8 }}
+                onClick={() => setShowAllRefs(v => !v)}>
+                {showAllRefs ? "收起" : `查看全部 ${refQ.refs.length} 条`}
+              </button>
+            )}
+          </>
+        )}
+      </section>
 
       <section className="card">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>

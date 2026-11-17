@@ -16,9 +16,10 @@ from .api.figures import router as figures_router
 from .api.insights import router as insights_router
 from .api.papers import router as papers_router
 from .api.thumbnails import router as thumbnails_router
+from .api.tracking import router as tracking_router
 from .db import init_db
 from .settings import CORS_ORIGINS
-from .services import llm, embeddings, nmt
+from .services import llm, embeddings, nmt, tracking
 
 app = FastAPI(title="科研小助手 Agent", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS,
@@ -30,6 +31,8 @@ def _start():
     init_db()
     # 后台预热离线翻译模型（模型已烘进镜像时秒级完成；不阻塞服务启动）
     threading.Thread(target=nmt.warmup, daemon=True).start()
+    # arXiv 动态追踪：按 TRACKING_INTERVAL_HOURS 周期刷新（多 worker 用 SQLite 租约去重）
+    tracking.start_scheduler()
 
 
 @app.get("/api/health")
@@ -48,3 +51,4 @@ app.include_router(code_router)
 app.include_router(figures_router)
 app.include_router(insights_router)
 app.include_router(thumbnails_router)
+app.include_router(tracking_router)

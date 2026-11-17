@@ -11,7 +11,8 @@ import time
 
 import requests
 
-from .store import chunks_of, hybrid_search, list_papers, paper_meta
+from .store import (chunks_of, hybrid_search, list_papers, paper_meta,
+                    refs_of)
 
 GITHUB_RE = re.compile(r"https?://github\.com/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+")
 NOISE = {"features", "topics", "about", "pricing", "login", "marketplace",
@@ -102,7 +103,23 @@ def reproducibility(paper_id: str) -> dict:
             "checked_at": time.strftime("%Y-%m-%d %H:%M:%S")}
 
 
+def _surnames(authors) -> set[str]:
+    return {str(a).split()[-1].lower() for a in (authors or []) if str(a).strip()}
+
+
+def _ref_base_id(arxiv_id: str | None) -> str:
+    m = re.search(r"(\d{4}\.\d{4,5})", arxiv_id or "")
+    return m.group(1) if m else ""
+
+
 def recommend(paper_id: str, top_k: int = 5) -> dict:
+    """推荐库内相似论文：混合检索召回 → 引用关系/共同作者/开源代码加权重排。
+
+    推荐理由只使用可核实信号（本文是否直接引用、是否共同作者、正文是否给出仓库、
+    发表年份），并优先把附带开源代码的论文排到前面。
+    """
+    from ..utils import keyword_overlap
+
     meta = paper_meta(paper_id) or {}
     if not meta:
         return {"error": f"未找到论文 {paper_id}"}
@@ -128,6 +145,60 @@ def recommend(paper_id: str, top_k: int = 5) -> dict:
         base = re.sub(r"v\d+$", "", arxiv) or item["paper_id"]
         if base not in family:
             family[base] = item
-    ranked = list(family.values())[:top_k]
+    ranked = list(family.values())
+    if not ranked:
+        return {"paper_id": paper_id, "title": meta.get("title"),
+                "basis": "标题+摘要的混合检索（BM25 + 向量，同系列版本去重）",
+                "items": []}
+
+    max_score = max(x["score"] for x in ranked) or 1.0
+    cur_refs = refs_of(paper_id)
+    ref_arxiv = {_ref_base_id(r.get("arxiv_id")) for r in cur_refs}
+    ref_arxiv.discard("")
+    ref_titles = [r.get("title") for r in cur_refs if r.get("title")]
+    cur_authors = _surnames(meta.get("authors"))
+    cur_year = meta.get("year") or 0
+
+    pool = ranked[:max(top_k * 3, 12)]
+    enriched = []
+    for item in pool:
+        cand = papers.get(item["paper_id"], {})
+        sim = item["score"] / max_score
+        reasons = []
+        cand_base = _ref_base_id(cand.get("arxiv_id"))
+        cited = bool(cand_base and cand_base in ref_arxiv) or any(
+            keyword_overlap(item["title"], t) >= 0.72 for t in ref_titles)
+        same_author = sorted(cur_authors & _surnames(cand.get("authors")))
+        repos = find_repos(item["paper_id"], limit=2)  # 只做正文正则，不发网络请求
+        recent = bool(cand.get("year") and cur_year and int(cand["year"]) >= int(cur_year) - 2)
+
+        if cited:
+            reasons.append("本文参考文献直接引用了该论文")
+        if same_author:
+            reasons.append(f"与本文有共同作者（{same_author[0]}）")
+        if repos:
+            reasons.append(f"正文提供开源仓库 {repos[0]}，可直接复现")
+        if recent:
+            reasons.append(f"较新工作（{cand['year']}）")
+        if sim >= 0.5:
+            reasons.append("标题与摘要主题高度相近（混合检索）")
+        elif not reasons:
+            reasons.append("研究主题相近（混合检索召回）")
+
+        rank_score = (sim + (0.35 if cited else 0) + (0.12 if repos else 0)
+                      + (0.08 if same_author else 0) + (0.05 if recent else 0))
+        enriched.append({
+            **item,
+            "similarity": round(sim, 3),
+            "rank_score": round(rank_score, 3),
+            "year": cand.get("year"),
+            "arxiv_id": cand.get("arxiv_id"),
+            "has_code": bool(repos),
+            "code_repos": repos,
+            "reasons": reasons[:4],
+        })
+    enriched.sort(key=lambda x: (x["rank_score"], x["similarity"]), reverse=True)
+    ranked = enriched[:top_k]
     return {"paper_id": paper_id, "title": meta.get("title"),
-            "basis": "标题+摘要的混合检索（BM25 + 向量，同系列版本去重）", "items": ranked}
+            "basis": "混合检索召回 + 引用关系/共同作者/开源代码加权（同系列版本去重）",
+            "items": ranked}

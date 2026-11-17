@@ -14,6 +14,7 @@ export const viewport: Viewport = {
 
 const nav = [
   { href: "/", label: "📚 文库" },
+  { href: "/track", label: "📡 追踪推荐" },
   { href: "/chat", label: "💬 问答" },
   { href: "/graph", label: "🕸 引用图谱" },
   { href: "/compare", label: "📊 版本比对" },
