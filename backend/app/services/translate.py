@@ -146,6 +146,11 @@ def translate_text(text: str, target: str = "zh") -> dict:
         return {"text": "", "mode": "empty"}
     protected, keep = _protect(text)
     if not llm.is_available():
+        # 本地 NMT 只有 en→zh 方向；中→英没有离线模型，直接说明，不返回伪译文
+        if target != "zh":
+            return {"text": "", "mode": "offline",
+                    "notice": "中→英学术翻译需要在线大模型（未配置 LLM_API_KEY）；"
+                              "离线 NMT 仅支持英→中，无法生成学术英文译文。"}
         local = nmt.translate([text])
         if local and local[0]:
             return {"text": local[0], "mode": "nmt"}

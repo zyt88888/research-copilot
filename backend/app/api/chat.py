@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from ..db import execute, loads, query
-from ..services import agent, copilot, figures, graph, rag, translate
+from ..services import agent, copilot, figures, graph, rag, survey, translate
 from ..services.rag import answer as rag_answer
 
 router = APIRouter(tags=["chat"])
@@ -75,6 +75,14 @@ def build_graph(paper_ids: str | None = None):
 def future(paper_ids: str | None = None):
     ids = [x for x in (paper_ids or "").split(",") if x] or None
     return graph.future_work(ids)
+
+
+@router.post("/api/survey")
+def survey_api(payload: dict):
+    """基于引用图谱 + 库内真实元数据生成领域简短综述。"""
+    ids = payload.get("paper_ids") or None
+    return survey.generate(payload.get("topic"), ids,
+                           max_papers=int(payload.get("max_papers") or 12))
 
 
 @router.post("/api/translate")

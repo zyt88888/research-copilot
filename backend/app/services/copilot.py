@@ -119,24 +119,41 @@ def _offline_outline(idea: str, papers: list[dict], refs: list[str]) -> dict:
 DIAGRAM_SYSTEM = "你是学术图表工程师，只输出代码，不输出解释。"
 
 
-def diagram(idea: str, kind: str = "mermaid") -> dict:
-    if not llm.is_available():
-        if kind == "tikz":
-            return {"code": _tikz_template(idea), "mode": "offline"}
-        return {"code": _mermaid_template(idea), "mode": "offline"}
+DIAGRAM_PROMPTS = {
+    "mermaid": ("画 Mermaid flowchart（TD 方向），包含输入、检索、模型、评估四个层次，"
+                "节点文字简短，只输出代码块。"),
+    "tikz": ("画 LaTeX TikZ 架构图（可直接编译），使用 node + arrows 表示数据流，"
+             "风格简洁学术，只输出 tikz 代码块。"),
+    "graphviz": ("画 Graphviz DOT 有向图（digraph，rankdir=LR，5-7 个节点），"
+                 "节点标签表示处理阶段，只输出 dot 代码块。"),
+    "matplotlib": ("写一段可直接运行的 Python matplotlib 脚本，绘制横向流程图："
+                   "用 FancyBboxPatch 画圆角节点、annotate 画箭头，"
+                   "保存为 pipeline.png，只输出 Python 代码块。"),
+}
+
+
+def _template(idea: str, kind: str) -> str:
     if kind == "tikz":
-        prompt = (f"为研究方案「{idea}」画 LaTeX TikZ 架构图（可直接编译），"
-                  "使用 node + arrows 表示数据流，风格简洁学术，只输出 tikz 代码块。")
-    else:
-        prompt = (f"为研究方案「{idea}」画 Mermaid flowchart（TD 方向），"
-                  "包含输入、检索、模型、评估四个层次，节点文字简短，只输出代码块。")
+        return _tikz_template(idea)
+    if kind == "graphviz":
+        return _dot_template(idea)
+    if kind == "matplotlib":
+        return _matplotlib_template(idea)
+    return _mermaid_template(idea)
+
+
+def diagram(idea: str, kind: str = "mermaid") -> dict:
+    kind = kind if kind in DIAGRAM_PROMPTS else "mermaid"
+    if not llm.is_available():
+        return {"code": _template(idea, kind), "mode": "offline", "kind": kind}
+    prompt = f"为研究方案「{idea}」{DIAGRAM_PROMPTS[kind]}"
     try:
         code = llm.chat([{"role": "system", "content": DIAGRAM_SYSTEM},
                          {"role": "user", "content": prompt}], max_tokens=900)
         code = re.sub(r"^```[a-zA-Z]*\n|```$", "", code.strip())
-        return {"code": code, "mode": "llm"}
+        return {"code": code, "mode": "llm", "kind": kind}
     except Exception as exc:
-        return {"code": _mermaid_template(idea), "mode": f"fallback:{exc}"}
+        return {"code": _template(idea, kind), "mode": f"fallback:{exc}", "kind": kind}
 
 
 def _mermaid_template(idea: str) -> str:
@@ -161,6 +178,64 @@ def _tikz_template(idea: str) -> str:
   \draw[->] (a)--(b); \draw[->] (b)--(c);
   \draw[->] (c)--(d); \draw[->] (d)--(e);
 \end{tikzpicture}"""
+
+
+def _dot_template(idea: str) -> str:
+    safe = idea.replace('"', "'").replace("\n", " ")[:40]
+    return f"""digraph ResearchPipeline {{
+  rankdir=LR;
+  graph [bgcolor="white", pad="0.3"];
+  node [shape=box, style="rounded,filled", fillcolor="#eef2ff",
+        color="#6366f1", fontname="Helvetica", fontsize=11];
+  edge [color="#94a3b8", arrowsize=0.8];
+
+  P [label="Research Problem"];
+  R [label="Retrieval\\n(BM25 + Dense)"];
+  G [label="Evidence &\\nGrounding"];
+  M [label="Method:\\n{safe}"];
+  E [label="Experiments &\\nEvaluation"];
+
+  P -> R -> G -> M -> E;
+}}"""
+
+
+def _matplotlib_template(idea: str) -> str:
+    safe = idea.replace('"', '\\"').replace("\n", " ")[:60]
+    return f'''"""研究流程图（离线模板，可直接运行）：python this_script.py -> pipeline.png"""
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch
+
+steps = [
+    "Research Problem",
+    "Retrieval\\n(BM25 + Dense)",
+    "Evidence &\\nGrounding",
+    "Method Design",
+    "Experiments &\\nEvaluation",
+]
+
+fig, ax = plt.subplots(figsize=(11, 2.8))
+ax.set_xlim(0, 11)
+ax.set_ylim(0, 2.8)
+ax.axis("off")
+
+w, h, gap = 1.82, 0.95, 0.24
+for i, text in enumerate(steps):
+    x = 0.2 + i * (w + gap)
+    ax.add_patch(FancyBboxPatch(
+        (x, 0.9), w, h, boxstyle="round,pad=0.03",
+        linewidth=1.4, edgecolor="#6366f1", facecolor="#eef2ff"))
+    ax.text(x + w / 2, 0.9 + h / 2, text, ha="center", va="center", fontsize=9)
+    if i:
+        ax.annotate("", xy=(x - 0.01, 1.37), xytext=(x - gap + 0.01, 1.37),
+                    arrowprops=dict(arrowstyle="->", color="#94a3b8"))
+
+ax.set_title("Research Pipeline: {safe}", fontsize=11)
+plt.tight_layout()
+plt.savefig("pipeline.png", dpi=200, bbox_inches="tight")
+print("saved pipeline.png")
+'''
 
 
 # --------------------------------------------------------------------------

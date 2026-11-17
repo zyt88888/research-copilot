@@ -1,6 +1,6 @@
 ﻿"use client";
 import { apiBase } from "../../lib/apiBase";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ErrorState, SkeletonCard } from "../../components/State";
 
 type ChartData = {
@@ -122,6 +122,53 @@ export default function CopilotPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // 中→英学术翻译
+  const [papers, setPapers] = useState<any[]>([]);
+  const [paperId, setPaperId] = useState("");
+  const [zhText, setZhText] = useState("");
+  const [enResult, setEnResult] = useState<any>(null);
+  const [transLoading, setTransLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(`${apiBase()}/api/papers`)
+      .then(r => r.json()).then(d => setPapers(d.papers || []))
+      .catch(() => setPapers([]));
+  }, []);
+
+  async function loadAbstract() {
+    if (!paperId) return;
+    setErr(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/papers/${paperId}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const meta = await r.json();
+      const abs = (meta.abstract || "").trim();
+      if (!abs) { setErr("该论文未解析出摘要，请直接粘贴中文文本"); return; }
+      setZhText(abs);
+      setEnResult(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function translateToEn() {
+    if (!zhText.trim()) return;
+    setTransLoading(true); setErr(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/translate`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: zhText, target: "en" }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setEnResult(await r.json());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setEnResult(null);
+    } finally {
+      setTransLoading(false);
+    }
+  }
+
   async function run(endpoint: string, body: any) {
     setLoading(true); setErr(null);
     try {
@@ -172,6 +219,10 @@ export default function CopilotPage() {
             onClick={async () => setDiagram(await run("diagram", { idea, kind: "mermaid" }))}>🖼 Mermaid 架构图</button>
           <button className="btn ghost" disabled={loading}
             onClick={async () => setDiagram(await run("diagram", { idea, kind: "tikz" }))}>📐 TikZ 架构图</button>
+          <button className="btn ghost" disabled={loading}
+            onClick={async () => setDiagram(await run("diagram", { idea, kind: "graphviz" }))}>🔷 Graphviz (DOT)</button>
+          <button className="btn ghost" disabled={loading}
+            onClick={async () => setDiagram(await run("diagram", { idea, kind: "matplotlib" }))}>🐍 Matplotlib 脚本</button>
         </div>
       </section>
 
@@ -200,16 +251,72 @@ export default function CopilotPage() {
 
       {diagram && (
         <section className="card">
-          <h3 style={{ marginTop: 0 }}>架构图（{diagram.mode === "llm" ? "在线生成" : "离线模板"}）</h3>
+          <h3 style={{ marginTop: 0 }}>
+            架构图（{diagram.mode === "llm" ? "在线生成" : "离线模板"}
+            {diagram.kind ? ` · ${diagram.kind}` : ""}）
+          </h3>
           <pre style={{ background: "#0f172a", color: "#e2e8f0", padding: 14, borderRadius: 10,
             overflow: "auto", maxHeight: 400, fontSize: 12 }}>
 {diagram.code}
           </pre>
           <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-3)" }}>
-            可复制到 <a href="https://mermaid.live" target="_blank" rel="noreferrer">Mermaid Live</a> 或 LaTeX 编辑器预览。
+            {diagram.kind === "graphviz" ? (
+              <>可复制到 <a href="https://dreampuf.github.io/GraphvizOnline/" target="_blank" rel="noreferrer">Graphviz Online</a> 预览，或 <code>dot -Tpng</code> 渲染。</>
+            ) : diagram.kind === "matplotlib" ? (
+              <>保存为 .py 后执行 <code>python script.py</code>，输出 pipeline.png。</>
+            ) : diagram.kind === "tikz" ? (
+              <>可复制到 LaTeX 编辑器编译（需 tikz 宏包）。</>
+            ) : (
+              <>可复制到 <a href="https://mermaid.live" target="_blank" rel="noreferrer">Mermaid Live</a> 预览。</>
+            )}
           </div>
         </section>
       )}
+
+      <section className="card">
+        <h3 style={{ marginTop: 0 }}>🌐 学术英译（中 → 英）</h3>
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+          公式、引用编号 [12]、URL 原样保留。该功能依赖在线大模型；离线模式会明确提示，
+          不会用机器直译冒充学术英文。
+        </div>
+        <div className="row grow" style={{ gap: 8, marginTop: 10 }}>
+          <select value={paperId} onChange={(e) => setPaperId(e.target.value)} style={{ flex: 1 }}>
+            <option value="">从库内论文载入摘要…</option>
+            {papers.map((p: any) => (
+              <option key={p.id} value={p.id}>{p.title}</option>
+            ))}
+          </select>
+          <button className="btn ghost" disabled={!paperId} onClick={loadAbstract}>载入摘要</button>
+        </div>
+        <textarea rows={6} value={zhText} placeholder="粘贴中文摘要 / 段落…"
+          onChange={(e) => setZhText(e.target.value)}
+          style={{ width: "100%", marginTop: 8 }} />
+        <div className="row" style={{ gap: 8, marginTop: 8, alignItems: "center" }}>
+          <button className="btn" disabled={transLoading || !zhText.trim()} onClick={translateToEn}>
+            {transLoading ? "翻译中…" : "翻译为学术英文"}
+          </button>
+          <button className="btn ghost" onClick={() => { setZhText(""); setEnResult(null); }}>清空</button>
+          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{zhText.length} 字符</span>
+        </div>
+        {enResult && (
+          <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+            {enResult.mode !== "llm" && (
+              <div className="chip warn" style={{ whiteSpace: "normal", lineHeight: 1.5 }}>
+                {enResult.notice || "当前为离线模式，未生成学术英文译文。"}
+              </div>
+            )}
+            {enResult.text && (
+              <pre style={{ background: "#f8fafc", padding: 14, borderRadius: 10,
+                overflow: "auto", whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.6 }}>
+{enResult.text}
+              </pre>
+            )}
+            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              模式：{enResult.mode === "llm" ? "在线大模型" : enResult.mode}
+            </div>
+          </div>
+        )}
+      </section>
 
       <section className="card">
         <h3 style={{ marginTop: 0 }}>📊 CSV → 图表 + Figure Caption</h3>

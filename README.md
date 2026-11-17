@@ -14,8 +14,8 @@ Lite 版零外部依赖即可启动（无 API Key 自动降级离线模式），
 | 语义去重 | 同一论文不同版本的自动归并与差异比对 | 64-permutation MinHash + shingle(5)，`DUP_THRESHOLD=0.45`，arXiv 底号强关联 |
 | 抗幻觉 RAG | 检索 → 证据约束作答 → 引用校验 | BM25 + 稠密向量 + RRF；低置信拒答；生成后剔除无依据引用 |
 | 翻译 | 全文/段落翻译，中英对照阅读 | 公式、代码块、URL、`[12]` 引用做占位符保护 |
-| 引用图谱 | PageRank 分层（bedrock / frontier / normal）、Future Work 状态判定 | NetworkX DiGraph + 关键词重合度 |
-| 学术写作 Copilot | 大纲、图表代码、CSV→图表、综述段落 | 证据驱动生成，输出附参考文献 |
+| 引用图谱 | PageRank 分层（bedrock / frontier / normal）、Future Work 状态判定、一键生成领域综述 | NetworkX DiGraph + 关键词重合度；综述仅用库内元数据，LLM 引用 `[P#]` 逐条校验，离线走抽取式模板 |
+| 学术写作 Copilot | 大纲、Mermaid/TikZ/Graphviz/Matplotlib 图、CSV→图表、中→英学术翻译 | 证据驱动生成，输出附真实参考文献；中→英需在线模型，离线明确提示不伪造译文 |
 | Agent | 规划 → 工具调用 → 观察 → 汇总（SSE 流式） | 16 个工具，最多 6 步，JSON function calling；按「工具+关键参数」语义去重；每次执行落库，可回放 trace |
 | 图表理解 | 「图 N 展示了什么」定位图注、裁剪原图、OCR 图内文字并作答 | 图注正则定位 + PyMuPDF 区域渲染 + PaddleOCR，问答页与 Agent `figure_lookup` 双入口 |
 | 长文档分层检索 | 章节级粗索引 → 块级下钻 → 与全局检索 RRF 合并 | 百页长文 recall@1 0.80（全局 hybrid 0.75），问答页可开关 |
@@ -37,7 +37,7 @@ research-copilot/
 ├── backend/
 │   ├── app/
 │   │   ├── api/            # papers.py / chat.py（问答、比对、Agent 执行历史）
-│   │   ├── services/       # pdf_parser, dedup, store, rag, translate, graph, copilot, agent, arxiv, scholar, figures, insights, codeexec, enrich, llm, embeddings, citation_quality, drill, tracking
+│   │   ├── services/       # pdf_parser, dedup, store, rag, translate, graph, survey, copilot, agent, arxiv, scholar, figures, insights, codeexec, enrich, llm, embeddings, citation_quality, drill, tracking
 │   │   ├── main.py         # FastAPI 入口（app.main:app）
 │   │   ├── db.py           # SQLite（WAL，无 ORM）
 │   │   └── settings.py     # 环境变量
@@ -137,8 +137,9 @@ Docker 运行时，`docker-compose.yml` 会把 `DATA_DIR=/app/data`、`DB_PATH=/
 | POST | `/api/compare` | 多论文多维度对比 |
 | GET | `/api/graph` | 引用图谱 + PageRank 分层（结果版本化缓存，返回 `cached`） |
 | GET | `/api/future` | Future Work 抽取与 open/resolved 判定 |
-| POST | `/api/translate` | 段落 / 整篇翻译 |
-| POST | `/api/copilot/{outline,diagram,csv}` | 大纲 / 图表 / CSV 转图表 |
+| POST | `/api/survey` | 基于图谱与库内元数据生成领域综述（`mode=llm\|offline`，引用逐条校验） |
+| POST | `/api/translate` | 段落 / 整篇翻译（`target=en` 中→英需在线模型，离线返回明确提示） |
+| POST | `/api/copilot/{outline,diagram,csv}` | 大纲 / 图表（mermaid、tikz、graphviz、matplotlib）/ CSV 转图表 |
 | POST | `/api/code/run` | 受限 Python 沙箱执行（返回 stdout / 图片产物） |
 | GET | `/api/code/artifact/{name}` | 读取沙箱产出的图片 |
 | GET | `/api/insights/reproducibility?paper_id=` | GitHub 仓库复现性评分（stars / License / 维护状态） |

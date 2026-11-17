@@ -30,6 +30,10 @@ export default function GraphPage() {
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
   const [view, setView] = useState({ k: 1, x: 0, y: 0 });
+  const [survey, setSurvey] = useState<any>(null);
+  const [surveyLoading, setSurveyLoading] = useState(false);
+  const [surveyErr, setSurveyErr] = useState<string | null>(null);
+  const [showSurvey, setShowSurvey] = useState(false);
   const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   // 画布实际尺寸：让 viewBox 与容器同尺寸，1 单位 = 1 CSS 像素，
   // 避免等比缩放把节点和文字整体缩小（1440 宽下节点看起来过小）
@@ -68,6 +72,22 @@ export default function GraphPage() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function genSurvey() {
+    setShowSurvey(true); setSurveyLoading(true); setSurveyErr(null);
+    try {
+      const r = await fetch(`${apiBase()}/api/survey`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ topic: query.trim() || undefined }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setSurvey(await r.json());
+    } catch (e) {
+      setSurveyErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSurveyLoading(false);
+    }
+  }
 
   const positions = useMemo(() => layoutForce(nodes, links, VW, VH), [nodes, links, VW, VH]);
   const byId = useMemo(() => Object.fromEntries(nodes.map(n => [n.id, n])), [nodes]);
@@ -146,6 +166,7 @@ export default function GraphPage() {
           <div className="row" style={{ gap: 6 }}>
             <input type="text" placeholder="搜索论文标题…" value={query}
               onChange={e => setQuery(e.target.value)} style={{ width: 190 }} />
+            <button className="btn ghost" disabled={surveyLoading} onClick={genSurvey}>📝 领域综述</button>
             <button className="btn ghost" onClick={() => zoom(1.2)}>＋</button>
             <button className="btn ghost" onClick={() => zoom(1 / 1.2)}>－</button>
             <button className="btn ghost" onClick={() => setView({ k: 1, x: 0, y: 0 })}>重置</button>
@@ -294,6 +315,51 @@ export default function GraphPage() {
         )}
 
         </>
+        )}
+
+        {showSurvey && (
+          <div className="card" style={{
+            position: "absolute", right: 16, top: 64, width: 620,
+            maxWidth: "calc(100% - 32px)", maxHeight: "calc(100% - 80px)",
+            overflow: "auto", zIndex: 7, margin: 0, background: "#fff",
+            boxShadow: "var(--shadow-md)",
+          }}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>📝 领域综述</h3>
+              <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                {survey && (
+                  <span className="chip">
+                    {survey.mode === "llm" ? "在线生成" : "离线抽取式"}
+                  </span>
+                )}
+                <button className="btn ghost" onClick={() => setShowSurvey(false)}>关闭</button>
+              </div>
+            </div>
+            {surveyLoading ? (
+              <div style={{ marginTop: 12 }}>
+                <div className="sk-label">正在基于引用图谱与库内元数据生成综述…</div>
+                <Skeleton rows={6} />
+              </div>
+            ) : surveyErr ? (
+              <div style={{ marginTop: 12 }}>
+                <ErrorState title="综述生成失败" message={surveyErr} onRetry={genSurvey} />
+              </div>
+            ) : survey ? (
+              <>
+                <pre style={{ background: "#f8fafc", padding: 14, borderRadius: 10,
+                  overflow: "auto", whiteSpace: "pre-wrap", fontSize: 13,
+                  lineHeight: 1.7, marginTop: 12 }}>
+{survey.markdown}
+                </pre>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6 }}>
+                  数据范围：{survey.stats?.papers ?? 0} 篇 · 引用边 {survey.stats?.edges ?? 0}
+                  　开放问题 {survey.stats?.open_questions ?? 0}
+                  {survey.dropped_citations
+                    ? ` · 已剔除无效引用 ${survey.dropped_citations} 处` : ""}
+                </div>
+              </>
+            ) : null}
+          </div>
         )}
       </section>
 
