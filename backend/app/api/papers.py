@@ -264,11 +264,11 @@ def _async_enrich(paper_id: str) -> None:
 
 @router.delete("/{paper_id}")
 def delete(paper_id: str):
-    store.delete_paper(paper_id)
+    store.delete_paper(paper_id, async_cleanup=True)
     return {"ok": True}
 
 
 @router.delete("")
 def delete_all():
-    """清空文库（含 PDF 与封面文件）。"""
-    return {"ok": True, "deleted": store.delete_all_papers()}
+    """清空文库（含 PDF 与封面文件）。bump 放后台，立即返回。"""
+    return {"ok": True, "deleted": store.delete_all_papers(async_cleanup=True)}

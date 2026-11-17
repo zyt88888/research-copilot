@@ -132,6 +132,7 @@ export default function LibraryPage() {
   const [uploading, setUploading] = useState(false);
   const [job, setJob] = useState<any>(null);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
+  const [uploadDone, setUploadDone] = useState<string | null>(null);  // 完成提示
   const [dup, setDup] = useState<any>(null);
   const [diff, setDiff] = useState<any>(null);
   const [drag, setDrag] = useState(false);
@@ -235,13 +236,18 @@ export default function LibraryPage() {
   async function handleFiles(files: FileList | null) {
     if (!files || !files.length) return;
     setUploading(true); setDup(null); setDiff(null); setUploadErr(null); setJob(null);
+    setUploadDone(null);
     try {
       const fd = new FormData();
       fd.append("file", files[0]);
       const r = await fetch(`${apiBase()}/api/papers/upload`, { method: "POST", body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j.detail || `上传失败（HTTP ${r.status}）`);
-      if (j.status === "ok") { await refresh(true); return; }
+      if (j.status === "ok") {
+        setUploadDone(`✓ 已入库：${j.title?.slice(0, 50)}（${j.num_pages} 页，${j.refs_count} 条参考文献）`);
+        await refresh(true);
+        return;
+      }
       if (j.status === "duplicate") { await resolveDuplicate(j.job_id, j.duplicate, j.version_diff); return; }
       if (!j.job_id) { setUploadErr(j.detail || JSON.stringify(j).slice(0, 200)); return; }
 
@@ -258,7 +264,9 @@ export default function LibraryPage() {
       }
       if (!last) throw new Error("解析超时，请稍后在文库刷新查看");
       if (last.status === "done") {
+        const res = last.result || {};
         setJob(null);
+        setUploadDone(`✓ 解析完成：${res.title?.slice(0, 50) || "论文"}（${res.num_pages || "?"} 页）${res.ocr_pages ? ` · OCR ${res.ocr_pages} 页` : ""}`);
         await refresh(true);
       } else if (last.status === "duplicate") {
         setJob(null);
@@ -272,6 +280,8 @@ export default function LibraryPage() {
       setUploadErr(e instanceof Error ? e.message : String(e));
     } finally {
       setUploading(false);
+      // 完成提示 6 秒后自动消失（让用户看到结果后还能继续拖文件）
+      if (uploadDone) setTimeout(() => setUploadDone(null), 6000);
     }
   }
 
@@ -339,13 +349,25 @@ export default function LibraryPage() {
                 </div>
               </div>
             ) : (
-              <div>
-                <Skeleton rows={2} />
-                <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 6 }}>
-                  {job?.stage || "上传中，正在建立解析任务…"}
+              <div style={{ padding: 12, background: "#eef2ff", borderRadius: 8,
+                fontSize: 13, color: "#3730a3" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 18 }}>⏳</span>
+                  <span>{job?.stage || "上传成功，正在解析版式与抽取参考文献…"}</span>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 6, paddingLeft: 26 }}>
+                  PDF 已保存到服务器。首次解析需要 2-10 秒，大论文可能更久。
+                  你可以先去文库看看已有的论文。
                 </div>
               </div>
             )}
+          </div>
+        )}
+        {uploadDone && !uploading && (
+          <div style={{ marginTop: 12, padding: 10, background: "#ecfdf5",
+            border: "1px solid #a7f3d0", borderRadius: 8,
+            fontSize: 13, color: "#047857" }}>
+            ✓ {uploadDone}
           </div>
         )}
         {uploadErr && (

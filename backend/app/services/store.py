@@ -165,20 +165,31 @@ def _remove_assets(meta: dict | None) -> None:
             pass
 
 
-def delete_paper(paper_id: str) -> None:
+def delete_paper(paper_id: str, async_cleanup: bool = False) -> None:
+    """删除单篇论文的 DB 记录；async_cleanup=True 时 bump_version/删文件放后台线程。"""
+    import threading as _th
     meta = paper_meta(paper_id)
     with get_conn() as conn:
         conn.execute("DELETE FROM papers WHERE id=?", (paper_id,))
         conn.execute("DELETE FROM chunks WHERE paper_id=?", (paper_id,))
         conn.execute("DELETE FROM refs WHERE paper_id=?", (paper_id,))
         conn.execute("DELETE FROM translations WHERE paper_id=?", (paper_id,))
+    if async_cleanup:
+        _th.Thread(target=_cleanup_after_delete, args=(meta,), daemon=True).start()
+    else:
+        _cleanup_after_delete(meta)
+
+
+def _cleanup_after_delete(meta: dict | None) -> None:
+    """删论文后的收尾：文件清理 + 版本号递增（可在后台执行）。"""
     _remove_assets(meta)
     bump_version()
     bump_graph_version()
 
 
-def delete_all_papers() -> int:
-    """清空文库：返回删除的论文篇数。"""
+def delete_all_papers(async_cleanup: bool = False) -> int:
+    """清空文库；async_cleanup=True 时版本 bump 放后台。"""
+    import threading as _th
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM papers").fetchall()
         metas = []
@@ -191,9 +202,16 @@ def delete_all_papers() -> int:
             conn.execute(f"DELETE FROM {table}")
     for m in metas:
         _remove_assets(m)
+    if async_cleanup:
+        _th.Thread(target=_bump_versions_only, daemon=True).start()
+    else:
+        _bump_versions_only()
+    return count
+
+
+def _bump_versions_only() -> None:
     bump_version()
     bump_graph_version()
-    return count
 
 
 def paper_meta(paper_id: str) -> dict | None:

@@ -51,5 +51,5 @@ ENV PYTHONUTF8=1 \
 
 EXPOSE 8000
 
-# uvicorn 直接跑；--host 0.0.0.0 让容器外能访问
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# uvicorn 多 worker：进程池解析 PDF 隔离在 worker 2，NMT warmup/请求处理不互相阻塞
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--timeout-keep-alive", "30"]
