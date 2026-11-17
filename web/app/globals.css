@@ -435,10 +435,26 @@ table.compare tr:hover td { background: #fafbff; }
 .chat-layout { display: flex; gap: 18px; align-items: flex-start; }
 .chat-layout > .chat-main { flex: 1; min-width: 0; }
 .chat-aside {
-  width: 440px; flex-shrink: 0;
+  width: 480px; flex-shrink: 0;
   position: sticky; top: 78px;
   display: flex; flex-direction: column;
+  height: calc(100vh - 100px);
   max-height: calc(100vh - 100px);
+}
+.chat-aside > .aside-scroll {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 10px;
+  overflow-y: auto; margin-top: 10px;
+}
+.chat-aside .panel-card { display: flex; flex-direction: column; min-height: 0; }
+.chat-aside .panel-card.fill { flex: 1; margin-bottom: 0; }
+.chat-aside .panel-body {
+  margin-top: 8px; overflow-y: auto;
+  border-top: 1px solid var(--line); padding-top: 10px;
+  max-height: 380px; min-height: 120px;
+}
+.chat-aside .panel-card.fill .panel-body {
+  flex: 1; min-height: 0; max-height: none;
 }
 
 /* ========== 图片 ========== */
@@ -472,7 +488,9 @@ img { border-radius: var(--r-sm); }
   select { min-height: 42px; }
   /* 问答页双栏退化为上下堆叠 */
   .chat-layout { flex-direction: column; }
-  .chat-aside { width: 100%; position: static; max-height: none; }
+  .chat-aside { width: 100%; position: static; height: auto; max-height: none; }
+  .chat-aside .panel-card.fill { flex: none; }
+  .chat-aside .panel-card.fill .panel-body { flex: none; max-height: 60vh; }
   textarea { min-height: 84px; }
   /* 防溢出 */
   .answer, .sources, .paper { overflow-wrap: anywhere; word-break: break-word; }

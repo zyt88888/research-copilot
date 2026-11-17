@@ -9,8 +9,8 @@ type Chunk = { id: string; page: number; kind: string; section: string; text: st
 // 单篇论文的原文对照面板（可独立收起、独立翻页、独立双语）
 type FocusReq = { paperId: string; bbox: number[] | null; page: number; nonce: number } | null;
 
-function PaperPanel({ paper, focus }: {
-  paper: Paper; focus: FocusReq;
+function PaperPanel({ paper, focus, fill = false }: {
+  paper: Paper; focus: FocusReq; fill?: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const [chunks, setChunks] = useState<Chunk[] | null>(null);
@@ -131,7 +131,7 @@ function PaperPanel({ paper, focus }: {
   }
 
   return (
-    <div className="card" style={{ marginBottom: 12 }}>
+    <div className={`card panel-card${fill ? " fill" : ""}`} style={{ marginBottom: 12 }}>
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
         onClick={() => setOpen(o => !o)}>
         <h3 style={{ margin: 0, fontSize: 14, maxWidth: "70%", overflow: "hidden",
@@ -171,10 +171,7 @@ function PaperPanel({ paper, focus }: {
               onClick={() => jumpToPage(pages[pages.indexOf(page) + 1] ?? page)}>下一页 ›</button>
           </div>
 
-          <div ref={bodyRef} style={{
-            marginTop: 8, overflowY: "auto", maxHeight: 380, minHeight: 120,
-            borderTop: "1px solid var(--line)", paddingTop: 10,
-          }}>
+          <div ref={bodyRef} className="panel-body">
             {chunksErr ? (
               <ErrorState title="原文载入失败" message={chunksErr} />
             ) : chunks === null ? (
@@ -511,9 +508,9 @@ export default function ChatPage() {
               <span style={{ fontSize: 12, color: "var(--ink-3)" }}>每篇可独立收起 / 翻页</span>
             )}
           </div>
-          <div style={{ marginTop: 10, overflowY: "auto", flex: 1 }}>
+          <div className="aside-scroll">
             {selPapers.map(p => (
-              <PaperPanel key={p.id} paper={p} focus={focus} />
+              <PaperPanel key={p.id} paper={p} focus={focus} fill={selPapers.length === 1} />
             ))}
           </div>
         </aside>
