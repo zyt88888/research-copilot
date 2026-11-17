@@ -17,7 +17,7 @@ Lite 版零外部依赖即可启动（无 API Key 自动降级离线模式），
 | 翻译 | 全文/段落翻译，中英对照阅读（左右双栏 + 同步滚动）、划词/悬停翻译 | 公式、代码块、URL、`[12]` 引用做占位符保护 |
 | 引用图谱 | PageRank 分层（bedrock / frontier / normal）、Future Work 状态判定、一键生成领域综述 | NetworkX DiGraph + 关键词重合度；综述仅用库内元数据，LLM 引用 `[P#]` 逐条校验，离线走抽取式模板 |
 | 学术写作 Copilot | 大纲、Mermaid/TikZ/Graphviz/Matplotlib 图、CSV→图表、中→英学术翻译 | 证据驱动生成，输出附真实参考文献；中→英需在线模型，离线明确提示不伪造译文 |
-| Agent | 规划 → 工具调用 → 观察 → 汇总（SSE 流式） | 16 个工具，最多 6 步，JSON function calling；按「工具+关键参数」语义去重；每次执行落库，可回放 trace |
+| Agent | 规划 → 工具调用 → 观察 → 汇总（SSE 流式） | 15 个工具，最多 6 步，JSON function calling；按「工具+关键参数」语义去重；每次执行落库，可回放 trace |
 | 图表理解 | 「图 N 展示了什么」定位图注、裁剪原图、OCR 图内文字并作答 | 图注正则定位 + PyMuPDF 区域渲染 + PaddleOCR，问答页与 Agent `figure_lookup` 双入口 |
 | 长文档分层检索 | 章节级粗索引 → 块级下钻 → 与全局检索 RRF 合并 | 百页长文 recall@1 0.80（全局 hybrid 0.75），问答页可开关 |
 | 版本比对 | 同一 arXiv 系列两版的差异 | 正文重合度 + 章节增删 + 可选 LLM 多维对比，独立 `/compare` 页 |
@@ -369,7 +369,7 @@ flowchart TD
     API --> GRAPH["graph：被引匹配 + PageRank + Future Work"]
     GRAPH --> DB
     API --> DEDUP["dedup：MinHash + arXiv 系列版本比对"]
-    API --> AGENT["agent：规划 → 16 工具调用 → 流式汇总"]
+    API --> AGENT["agent：规划 → 15 工具调用 → 流式汇总"]
     AGENT --> RAG & GRAPH & DEDUP & TRANS["translate：占位符保护"]
 ```
 

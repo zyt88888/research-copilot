@@ -220,7 +220,7 @@
     <tr>
       <td><b>综合</b><br>Agent 闭环</td>
       <td>自主规划、工具调用、闭环探索</td>
-      <td>16 个工具；规划→调用→观察→再规划→汇总；SSE 事件流；执行历史可回放；工具调用语义去重</td>
+      <td>15 个工具；规划→调用→观察→再规划→汇总；SSE 事件流；执行历史可回放；工具调用语义去重</td>
       <td>Agent<br>§5.7</td>
     </tr>
   </table>
@@ -304,7 +304,7 @@
       <rect x="38" y="392" width="160" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="56" y="411">figures</text><text x="56" y="426" font-size="9" fill="#64748b">bbox 裁切 / 图内 OCR</text>
       <rect x="208" y="392" width="170" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="226" y="411">citation_quality / drill</text><text x="226" y="426" font-size="9" fill="#64748b">含金量 / 下钻</text>
       <rect x="388" y="392" width="140" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="406" y="411">copilot</text><text x="406" y="426" font-size="9" fill="#64748b">框架 / 图表 / 英译</text>
-      <rect x="538" y="392" width="180" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="556" y="411">agent</text><text x="556" y="426" font-size="9" fill="#64748b">16 工具 / SSE / 去重</text>
+      <rect x="538" y="392" width="180" height="44" rx="4" fill="#fff" stroke="#6ee7b7"/><text x="556" y="411">agent</text><text x="556" y="426" font-size="9" fill="#64748b">15 工具 / SSE / 去重</text>
     </g>
     <rect x="760" y="300" width="220" height="150" rx="8" fill="#f5f3ff" stroke="#ddd6fe"/>
     <text x="778" y="324" font-size="14" font-weight="700" fill="#5b21b6">模型与降级</text>
@@ -365,7 +365,7 @@
     <line x1="884" y1="44" x2="904" y2="44" stroke="#475569" marker-end="url(#ar2)"/>
   </svg>
   <h4>③ Agent 闭环</h4>
-  <p>任务 → 规划（JSON 步骤）→ 选择工具（16 个）→ 执行并观察 → 判断是否继续（最多 6 步）→ 汇总。全程 SSE 推送 <code>plan / step_start / tool_result / token / final</code> 事件，执行记录落库可回放。</p>
+  <p>任务 → 规划（JSON 步骤）→ 选择工具（15 个）→ 执行并观察 → 判断是否继续（最多 6 步）→ 汇总。全程 SSE 推送 <code>plan / step_start / tool_result / token / final</code> 事件，执行记录落库可回放。</p>
   <h3>3.4 部署拓扑</h3>
   <div class="grid2">
     <div class="card"><h4>容器</h4><p><code>research-copilot-backend</code>（8000，健康检查 <code>/api/health</code>）与 <code>research-copilot-web</code>（3000），web 等 backend healthy 后启动。</p></div>
@@ -404,7 +404,7 @@
     <b>后处理：</b>正则抽取答案中的 <code>[S#]</code>，与本次召回集合比对；非法编号剔除并告警；若没有任何有效引用，降级为拒答或抽取式摘要。</p>
   </div>
   <h4>③ 工具调用与事件流</h4>
-  <p>Agent 的 16 个工具以 JSON Schema 描述（检索、图表理解、Future Work、综述、翻译、代码沙箱、arXiv 检索、复现性、推荐等）。规划器输出步骤列表，执行器逐步调用并把 <code>tool_result</code> 回填上下文；SSE 由 Next.js Route Handler 直接透传，避免 rewrite 缓冲导致「看起来卡住」。</p>
+  <p>Agent 的 15 个工具以 JSON Schema 描述（检索、论文详情、多论文对比、引用图谱、Future Work、翻译、论文框架、arXiv / Semantic Scholar 检索、代码沙箱、复现性、推荐、图表定位等）。规划器输出步骤列表，执行器逐步调用并把 <code>tool_result</code> 回填上下文；SSE 由 Next.js Route Handler 直接透传，避免 rewrite 缓冲导致「看起来卡住」。</p>
   <h4>④ 多模态图理解</h4>
   <p>问答中识别「图 N / Figure N」→ 在图注块中定位 → PyMuPDF 按 bbox 2× 裁切 → OCR 图内文字 → 图注 + 同页正文 + OCR 文本作为唯一依据交给模型解读。阅读器内联图片接口使用 <code>with_ocr=False</code>，只裁图不 OCR，避免批量打开论文时的内存峰值。</p>
   <h4>⑤ 翻译的占位符协议</h4>
@@ -541,7 +541,7 @@
   <div class="figure"><img src="screenshots/06-agent.png" alt="Agent 执行"><div class="cap">Agent：plan 步骤、step_start、tool_result、token 流与最终结论</div></div>
   <div class="grid2">
     <div class="figure"><img src="screenshots/06b-agent-history.png" alt="Agent 历史"><div class="cap">执行历史：状态、耗时、规划与工具调用可回放</div></div>
-    <div class="card"><h4>16 个工具</h4><p>检索问答、图表理解、Future Work、领域综述、翻译、代码沙箱、arXiv 检索/入库、复现性、推荐、版本差异、引用质量等。</p>
+    <div class="card"><h4>15 个工具</h4><p>检索问答、论文详情、多论文对比、引用图谱、Future Work、翻译、论文框架、arXiv / Semantic Scholar 检索、代码沙箱、复现性、推荐、图表定位。</p>
       <h4 style="margin-top:3mm">去重与上限</h4><p>按「工具 + 关键参数」语义去重；最多 6 步；每步事件实时 SSE 推送并落库。</p>
     </div>
   </div>
